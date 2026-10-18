@@ -519,6 +519,15 @@ async function connectWebSocket() {
             // Show "connected" OSD if we were reconnecting
             if (wasReconnecting) {
                 showErrorOsd('Reconnected');
+                // Rehydrate the session immediately so the web UI's cast menu
+                // and remote controls show correct state the moment the session
+                // reappears, instead of waiting for the next 10s progress tick.
+                if (currentItemId && mpvProcess) {
+                    try {
+                        const posTicks = Math.round((currentPositionSeconds || 0) * 10000000);
+                        reportPlaybackProgress(currentItemId, posTicks);
+                    } catch (e) {}
+                }
             }
             
             const msg = {
@@ -609,38 +618,60 @@ function scheduleReconnect() {
     }
     
     reconnectAttempts++;
-    // Match jellyfin-web's reconnect policy (jellyfin-sdk-typescript:
-    // RECONNECT_INITIAL_DELAY 1s, factor 1.5): the drops we see are short
-    // server-side outages (5-30s), so retrying early lands within the same
-    // outage window and the next attempt catches the recovery quickly.
-    const delaySeconds = Math.min(30, 1 * Math.pow(1.5, reconnectAttempts - 1));
-    
+
     // Only show OSD after first retry fails (avoids flashing on brief network blips)
     if (reconnectAttempts > 1) {
         showErrorOsd('Connection lost — reconnecting...');
     }
-    
-    log('info', 'ws', `🔄 Scheduling automatic reconnection in ${delaySeconds} seconds (Attempt ${reconnectAttempts})...`);
-    
-    reconnectInterval = setTimeout(async () => {
-        reconnectInterval = null;
-        if (ws && ws.readyState === WebSocket.OPEN) {
+
+    log('info', 'ws', `🔄 Reconnecting — probing server every 1s (Attempt ${reconnectAttempts})...`);
+
+    // Hot recovery: the drops we see are short server-side outages (5-30s).
+    // Probing every 1s means we escape within ~1s of the server coming back,
+    // instead of after the next backoff slot (up to 30s late). WS connect
+    // attempts themselves are still paced exponentially (jellyfin-web SDK
+    // shape: 1s x 1.5, 30s cap) so a broken WS endpoint is not hammered.
+    let probeBusy = false;
+    let serverSeenDown = false;
+    let connectFailures = 0;
+    let connectNotBefore = 0;
+
+    reconnectInterval = setInterval(async () => {
+        if (isShuttingDown) {
+            clearInterval(reconnectInterval);
+            reconnectInterval = null;
             return;
         }
-
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            clearInterval(reconnectInterval);
+            reconnectInterval = null;
+            return;
+        }
+        if (probeBusy) return;
+        probeBusy = true;
         try {
-            log('info', 'ws', '📡 Checking network connection before reconnecting...');
             const headers = getAuthHeaders();
-            await axios.get(`${CONFIG.serverUrl}/System/Info`, { 
+            await axios.get(`${CONFIG.serverUrl}/System/Info`, {
                 headers,
-                timeout: 3000
+                timeout: 800
             });
-            
-            log('info', 'ws', '✅ Network connection active. Attempting WebSocket reconnection...');
-            await connectWebSocket();
-            
+
+            if (serverSeenDown) {
+                serverSeenDown = false;
+                log('info', 'ws', '✅ Server is reachable again');
+            }
+
+            if (Date.now() >= connectNotBefore) {
+                connectFailures++;
+                const paceSeconds = Math.min(30, Math.pow(1.5, connectFailures - 1));
+                connectNotBefore = Date.now() + paceSeconds * 1000;
+                log('info', 'ws', '✅ Network connection active. Attempting WebSocket reconnection...');
+                await connectWebSocket();
+            }
         } catch (error) {
             if (error.response && error.response.status === 401) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
                 log('info', 'auth', '🔐 Token expired, reauthenticating...');
                 showErrorOsd('Authentication expired — reconnecting...');
                 const authenticated = await authenticateUser();
@@ -649,19 +680,19 @@ function scheduleReconnect() {
                 } else {
                     log('error', 'auth', '❌ Reauthentication failed. Waiting for next attempt.');
                     showErrorOsd('Authentication failed');
-                    clearTimeout(reconnectInterval);
-                    reconnectInterval = null;
                     scheduleReconnect();
                 }
-            } else {
-                log('warn', 'ws', `⚠️ Server unavailable or network down. Retrying in ${delaySeconds}s...`);
-                showErrorOsd('Server unreachable — retrying...');
-                clearTimeout(reconnectInterval);
-                reconnectInterval = null;
-                scheduleReconnect();
+                return;
             }
+            if (!serverSeenDown) {
+                serverSeenDown = true;
+                log('warn', 'ws', '⚠️ Server unavailable or network down. Probing every 1s...');
+                showErrorOsd('Server unreachable — retrying...');
+            }
+        } finally {
+            probeBusy = false;
         }
-    }, delaySeconds * 1000);
+    }, 1000);
 }
 
 function reportCapabilities() {

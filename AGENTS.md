@@ -88,7 +88,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 - **Playable types**: `Episode`, `Movie`, `Video`, `MusicVideo`, `Audio` — anything else is skipped.
 - **Watched threshold**: Item marked watched at 90% of runtime.
 - **EOF detection**: Observes `eof-reached` property (ID 8). Logs item ID, position, duration, queue index, and whether it's the last item. This is more reliable than the progress poll's position-based check for triggering auto-close.
-- **Reconnection**: Exponential backoff (1s × 1.5, 30s cap — matches jellyfin-web's SDK policy) on WebSocket disconnect. Drops observed in production are short server-side outages (5-30s); early retries recover within them.
+- **Reconnection**: hot-probe loop on disconnect — `GET /System/Info` every 1s and connect the moment it answers, so a 5-30s outage costs ~1s of extra gap instead of a backoff slot (up to 30s). WS connect attempts are paced exponentially (1s × 1.5, 30s cap — jellyfin-web SDK shape) so a broken WS endpoint isn't hammered. On reconnect the shim immediately re-reports playback progress so the session reappears with `NowPlayingItem` set.
 - **Dead-connection watchdog (client-side)**: protocol-level `ws.ping()` every 15s; any inbound frame (pong, app KeepAlive echo, any message) counts as liveness proof. If nothing arrives for 35s the socket is `terminate()`d (NOT `close()`d — the ws docs' "How to detect and close broken connections" pattern) to force the reconnect path immediately. A half-open TCP connection otherwise accepts our sends silently and can take many minutes to surface an error. Verified live: Kestrel auto-pongs protocol pings. TCP keepalive (20s) is also enabled on the raw socket as NAT insurance.
 - **Only `KeepAlive` messages refresh the server's `LastKeepAliveDate`.** In `WebSocketConnection.SendKeepAliveResponse` the server stamps it on every inbound `KeepAlive` message; other traffic does not count. Keep the app-level KeepAlive cadence at ≤30s (server ForceKeepAlive nudges at 45s of silence, disposes the socket at 60s).
 - **No planned refresh, ever.** v1.12.1 added a watchdog that closed/reopened the socket every ~25 min to preempt external cuts. It was removed in v1.12.4: the cuts are not connection-age-based (a 1006 drop was logged 5 min after a refresh), while every refresh was a client-visible disconnect — the Jellyfin web UI drops its cast selection and playback controls on it (progress/watched marking are HTTP and unaffected). Users with healthy connections got a cast-disconnect every 25 minutes. Do not reintroduce a keep-alive-reconnect without evidence that the cuts are age-based.
@@ -373,7 +373,7 @@ All state is module-level variables. No state machine or stores — just mutable
 | `ws` | WebSocket | Connection to Jellyfin server |
 | `reconnectAttempts` | number | Current backoff level (resets on successful connect) |
 | `isReconnecting` | boolean | True during reconnection attempt |
-| `reconnectInterval` | Timer | Active reconnect timer |
+| `reconnectInterval` | Timer | Hot-recovery probe loop (1s) while disconnected |
 | `keepAliveInterval` | Timer | WebSocket keep-alive interval |
 | `heartbeatInterval` | Timer | Dead-connection watchdog: 15s protocol pings, 35s silence → `terminate()` |
 | `lastMessageReceivedAt` | number | Timestamp of last message from server (for disconnect diagnosis) |
@@ -482,7 +482,7 @@ Use patterns like:
 
 ### WebSocket disconnect
 
-`scheduleReconnect()` implements exponential backoff matching jellyfin-web's SDK: 1s × 1.5 (1s, 1.5s, 2.25s, …), 30s cap. Resets `reconnectAttempts` on successful connect. `isReconnecting` prevents duplicate reconnection attempts.
+`scheduleReconnect()` starts a 1s probe loop (`GET /System/Info`, 800ms timeout) that connects the moment the server answers; WS connect attempts within it are paced 1s × 1.5 (30s cap). Logs "Server unavailable" only on the down-transition (no 1Hz spam). Resets `reconnectAttempts` on successful connect. `isReconnecting` prevents duplicate reconnection attempts. 401 from the probe triggers reauth before connecting.
 
 ### MPV process crash
 
