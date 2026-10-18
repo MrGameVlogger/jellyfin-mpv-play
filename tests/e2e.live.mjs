@@ -738,9 +738,10 @@ t(19, 'auto-advance: reaching EOF moves to the next episode', async ({ items }) 
     const dur = await mpvGet('duration');
     await seekWhenReady(dur - 0.4);
     await waitFor('Starting next episode', 25000);
-    await sleep(1500);
-    const f = await mpvGet('filename');
-    check(String(f).includes(nextEp.Id), `did not advance to next episode (got ${f})`);
+    // Identity checks must use `path` (mpv's `filename` is only the last path
+    // component — for stream URLs that is "stream?static=true&ApiKey=...").
+    // waitForMpvPath also polls instead of trusting a fixed sleep.
+    await waitForMpvPath(nextEp.Id);
 });
 
 t(20, 'mark watched at 90%+ and restore unplayed afterwards', async ({ items }) => {
