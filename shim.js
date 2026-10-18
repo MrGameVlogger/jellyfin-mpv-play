@@ -3136,6 +3136,9 @@ function showHeadlessErrorDialog(title, message) {
 }
 
 function showErrorDialog(title, message) {
+    // Test runs (and CI) must never raise dialogs on someone's desktop —
+    // a test whose config is deliberately broken would spam the user.
+    if (process.env.JELLYFIN_MPV_NO_DIALOGS === '1') return;
     const { execFile } = require('child_process');
     const fullMessage = `${title}\n\n${message}`;
     
