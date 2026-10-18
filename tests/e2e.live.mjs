@@ -211,7 +211,12 @@ function reapStaleTestMpvs() {
 let shimProc, shimOut = '';
 function startShim(configPath = TMP_CONFIG) {
     shimOut = '';
-    shimProc = spawn('node', ['shim.js', configPath], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    shimProc = spawn('node', ['shim.js', configPath], {
+        cwd: ROOT,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // never let a test shim raise an error dialog on the user's desktop
+        env: { ...process.env, JELLYFIN_MPV_NO_DIALOGS: '1' }
+    });
     shimProc.stdout.on('data', d => shimOut += d);
     shimProc.stderr.on('data', d => shimOut += d);
 }
