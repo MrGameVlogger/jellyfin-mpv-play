@@ -12,10 +12,14 @@
 // locks) is snapshotted and restored/removed in teardown().
 import { spawn, execSync } from 'child_process';
 import net from 'net';
+import http from 'http';
+import https from 'https';
+import tls from 'tls';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import axios from 'axios';
+import { WebSocket } from 'ws';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const { createRequire } = await import('module');
@@ -356,11 +360,11 @@ async function connectIpcWhenReady(timeoutMs = 25000) {
 // ---------- config fixture ----------
 // Escape for a JS single-quoted string: backslashes first, then quotes.
 const jsStr = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-function writeConfig({ autoClose = false, headless = true, extraMpvFlags = [] } = {}) {
+function writeConfig({ autoClose = false, headless = true, extraMpvFlags = [], serverUrl = cfg.serverUrl } = {}) {
     const flags = ['--vo=null', '--ao=null', '--force-window=no', ...extraMpvFlags]
         .map(f => `'${jsStr(f)}'`).join(', ');
     fs.writeFileSync(TMP_CONFIG, `module.exports = {
-    serverUrl: '${jsStr(cfg.serverUrl)}',
+    serverUrl: '${jsStr(serverUrl)}',
     username: '${jsStr(cfg.username)}',
     password: '${jsStr(cfg.password)}',
     mpvPath: '${jsStr(cfg.mpvPath)}',
@@ -1123,6 +1127,135 @@ t(24, 'shutdown: lock file cleaned, session stops', async () => {
     check(/Closing application/.test(shimOut), 'shutdown contract missing');
 });
 
+// Minimal HTTP+WebSocket TCP proxy — lets a test sever ONE shim connection at
+// the TCP level (an RST exactly like the real-world 1006 drops) without
+// touching the other.
+function startWsProxy(target) {
+    const t = new URL(target);
+    const isTls = t.protocol === 'https:';
+    const upstreamPort = Number(t.port) || (isTls ? 443 : 80);
+    const upgrades = [];
+    const server = http.createServer((req, res) => {
+        const headers = { ...req.headers, host: t.host };
+        const p = (isTls ? https : http).request({ hostname: t.hostname, port: upstreamPort, path: req.url, method: req.method, headers }, pr => {
+            res.writeHead(pr.statusCode, pr.headers);
+            pr.pipe(res);
+        });
+        p.on('error', () => { try { res.destroy(); } catch {} });
+        req.pipe(p);
+    });
+    server.on('upgrade', (req, clientSock, head) => {
+        const up = isTls
+            ? tls.connect({ host: t.hostname, port: upstreamPort, servername: t.hostname })
+            : net.connect(upstreamPort, t.hostname);
+        up.on(isTls ? 'secureConnect' : 'connect', () => {
+            const hdrs = [];
+            for (let i = 0; i < req.rawHeaders.length; i += 2) {
+                const k = req.rawHeaders[i];
+                if (k.toLowerCase() === 'host') { hdrs.push(`Host: ${t.host}`); continue; }
+                hdrs.push(`${k}: ${req.rawHeaders[i + 1]}`);
+            }
+            up.write(`${req.method} ${req.url} HTTP/1.1\r\n${hdrs.join('\r\n')}\r\n\r\n`);
+            if (head && head.length) up.write(head);
+            const pair = { dead: false, kill() { if (!pair.dead) { pair.dead = true; try { clientSock.destroy(); } catch {} try { up.destroy(); } catch {} } } };
+            upgrades.push(pair);
+            clientSock.on('error', () => {});
+            up.on('error', () => {});
+            clientSock.pipe(up);
+            up.pipe(clientSock);
+        });
+        up.on('error', () => { try { clientSock.destroy(); } catch {} });
+    });
+    return {
+        upgrades,
+        listen: () => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port))),
+        close: () => new Promise(r => { try { server.close(() => r()); } catch { r(); } })
+    };
+}
+
+t(33, 'presence socket: session stays in /Sessions while any socket lives', async () => {
+    // Pure server-mechanism proof with raw sockets: Jellyfin merges both
+    // connections into one session and only drops the session when the LAST
+    // socket closes (SessionManager.CloseIfNeededAsync). This is what the shim's
+    // redundant presence socket relies on to keep the web UI's cast alive.
+    const deviceId = `${TEST_ID}-dual`;
+    const auth = await login(deviceId);
+    const token = auth.Authorization.match(/Token="([^"]+)"/)[1];
+    const url = cfg.serverUrl.replace(/^http/, 'ws') + `/socket?ApiKey=${token}&deviceId=${deviceId}`;
+    const findSes = async () => {
+        const r = await get('/Sessions');
+        return (r.data || []).find(s => s.DeviceId === deviceId);
+    };
+    const openSock = () => new Promise((resolve, reject) => {
+        const w = new WebSocket(url);
+        w.on('open', () => resolve(w));
+        w.on('error', reject);
+    });
+    const a = await openSock();
+    const b = await openSock();
+    let ses;
+    for (let i = 0; i < 25 && !ses; i++) { ses = await findSes(); if (!ses) await sleep(300); }
+    check(ses, 'dual-socket session never appeared in /Sessions');
+
+    a.close();
+    let vanishedAt = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 5000) {
+        const cur = await findSes();
+        if (!cur) { vanishedAt = Date.now() - t0; break; }
+        ses = cur;
+        await sleep(250);
+    }
+    check(vanishedAt === null, `session vanished ${vanishedAt}ms after ONE socket closed`);
+    check(ses && ses.Id === (await findSes())?.Id, 'session id changed after a single socket closed');
+
+    b.close();
+    let gone = false;
+    for (let i = 0; i < 20; i++) { if (!(await findSes())) { gone = true; break; } await sleep(300); }
+    check(gone, 'session still listed after BOTH sockets closed');
+
+    await api.post('/Sessions/Logout', {}, { headers: { Authorization: auth.Authorization }, validateStatus: () => true });
+});
+
+t(34, 'presence socket: shim keeps its session through a single-socket kill', async () => {
+    // The user-visible acceptance test: kill ONE of the shim's two connections
+    // at the TCP level and verify /Sessions never blips (which is exactly the
+    // condition under which jellyfin-web keeps its cast selection).
+    const proxy = startWsProxy(cfg.serverUrl);
+    const port = await proxy.listen();
+    const base = new URL(cfg.serverUrl);
+    await stopShim(); // the runner may have revived a suite shim — it holds the config lock
+    writeConfig({ serverUrl: `http://127.0.0.1:${port}${base.pathname.replace(/\/$/, '')}` });
+    startShim();
+    await waitFor('WebSocket connection established', 25000, 'primary socket up');
+    await waitFor('Presence WebSocket established', 25000, 'presence socket up');
+    const ses = await findSession();
+    check(ses, 'shim session not found');
+    check(proxy.upgrades.length >= 2, `expected 2 WS upgrades through proxy, saw ${proxy.upgrades.length}`);
+
+    const mark = markLog();
+    proxy.upgrades[1].kill();
+    let vanishedAt = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 8000) {
+        const r = await get('/Sessions');
+        const still = (r.data || []).find(s => s.DeviceId === TEST_ID);
+        if (!still) { vanishedAt = Date.now() - t0; break; }
+        await sleep(200);
+    }
+    check(vanishedAt === null, `session vanished ${vanishedAt}ms after single-socket kill`);
+
+    await waitForSince(mark, /Presence socket disconnected|Reconnecting presence socket|Reconnecting primary socket/, 15000, 'drop logged');
+    for (let i = 0; i < 40 && proxy.upgrades.length < 3; i++) await sleep(250);
+    check(proxy.upgrades.length >= 3, 'killed socket did not reconnect through proxy');
+    await sleep(1500);
+    const ses2 = await findSession();
+    check(ses2, 'shim session lost after single-socket kill + reconnect');
+
+    await stopShim();
+    await proxy.close();
+});
+
 // ---------- runner ----------
 async function main() {
     reapStaleTestMpvs();
@@ -1165,8 +1298,8 @@ async function main() {
                     /→|General command|Play command data|Playlist changed|Starting|Already playing|MPV Error|error|No more|Queue|shuffled|Skip intro|SyncPlay|File loaded|watched|report|Report|mark/i.test(l)).slice(-12);
                 for (const l of interesting) console.log(`      dbg| ${l.trim().slice(0, 160)}`);
             }
-            // revive the shim if a test left it dead
-            if (!shimProc && test.num !== 24) {
+            // revive the shim if a test left it dead (24 and 34 end shim-less on purpose)
+            if (!shimProc && test.num !== 24 && test.num !== 34) {
                 writeConfig();
                 startShim();
                 await waitFor('WebSocket connection established', 30000);
