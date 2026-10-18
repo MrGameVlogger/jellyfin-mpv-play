@@ -18,6 +18,19 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.13.0
+
+### Features
+- **Redundant presence WebSocket keeps the web UI's cast alive.** The shim now maintains a second connection to the server. Jellyfin merges both into one session and only removes the session from `/Sessions` when *every* socket is down — and the Jellyfin web UI drops its cast selection and playback controls the moment the session disappears from that list (it never re-attaches on its own). A single-socket drop is now completely invisible: no cast loss, no controls loss, no OSD. Disable with `wsPresenceSocket: false` in config.js.
+
+### Bug Fixes
+- **Dead-connection watchdog.** A half-open TCP connection (the path died without a close frame) used to accept sends silently for many minutes while holding a zombie session. The shim now proves the link with protocol pings every 15s and force-closes the socket after 35s of silence, entering the reconnect path immediately. TCP keepalive (20s) is also enabled as NAT insurance.
+- **Reconnect within ~1s of the server's return.** While disconnected, the shim probes the server every second and reconnects the moment it answers — previously it slept for the next backoff slot first (up to 30s late). On reconnect it immediately re-reports playback state so the web UI shows correct state the moment the session reappears.
+
+### Internal
+- Live e2e suite grown to 34 tests, including two WS-resilience tests: raw-socket proof of the session/socket mechanics (one session id survives one close, dies with the last) and the acceptance test — a real shim connection TCP-killed mid-flight behind a TLS-aware proxy while `/Sessions` is polled continuously and must never blip.
+
+---
 ## v1.12.4
 
 ### Bug Fixes
