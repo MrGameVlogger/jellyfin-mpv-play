@@ -18,6 +18,16 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.12.4
+
+### Bug Fixes
+- **WebSocket refresh watchdog removed** — it closed and reopened the connection every 25 minutes to preempt external cuts, but those cuts are not connection-age-based (a drop was observed 5 minutes after a refresh) while every refresh was a real disconnect for the client: the Jellyfin web UI drops its cast selection and playback controls on it. Users on perfectly healthy connections got a guaranteed cast-disconnect every 25 minutes, and locally-hosted users reported losing the cast and remote controls mid-session (queue, progress and watched marking kept working — those are HTTP). With the watchdog gone a healthy connection sees no WebSocket events at all; reconnect-on-real-drops is unchanged.
+
+### Internal
+- E2E test 19 identifies episodes via `path` — mpv's `filename` is only the URL basename and can never contain the item id (the suite's own rule); it now polls instead of trusting a fixed sleep.
+
+---
+
 ## v1.12.3
 
 ### Bug Fixes
