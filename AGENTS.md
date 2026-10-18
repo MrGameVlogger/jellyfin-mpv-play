@@ -89,6 +89,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 - **Watched threshold**: Item marked watched at 90% of runtime.
 - **EOF detection**: Observes `eof-reached` property (ID 8). Logs item ID, position, duration, queue index, and whether it's the last item. This is more reliable than the progress poll's position-based check for triggering auto-close.
 - **Reconnection**: Exponential backoff (1s × 1.5, 30s cap — matches jellyfin-web's SDK policy) on WebSocket disconnect. Drops observed in production are short server-side outages (5-30s); early retries recover within them.
+- **No planned refresh, ever.** v1.12.1 added a watchdog that closed/reopened the socket every ~25 min to preempt external cuts. It was removed in v1.12.4: the cuts are not connection-age-based (a 1006 drop was logged 5 min after a refresh), while every refresh was a client-visible disconnect — the Jellyfin web UI drops its cast selection and playback controls on it (progress/watched marking are HTTP and unaffected). Users with healthy connections got a cast-disconnect every 25 minutes. Do not reintroduce a keep-alive-reconnect without evidence that the cuts are age-based.
 - **jf-mpv-osc integration**: Optional integration with [jf-mpv-osc](https://github.com/iwalton3/jf-mpv-osc) for Jellyfin-styled MPV UI. Pushes state via `shim-jf-osc-state` (track lists, queue, favorites, subtitle styling, SyncPlay groups). Handles actions via `shim-jf-osc-action` (skip, next/prev, set-sub, set-audio, screenshot, fullscreen, syncplay-join, syncplay-new, syncplay-disable, syncplay-refresh, etc.). Also handles direct `shim-close` and `shim-jf-osc-ui-seek` messages. All integration is optional — messages are silently ignored if OSC isn't loaded. See README.md for full tier support table.
 
 ## WebSocket behavior (learned the hard way)
@@ -118,9 +119,10 @@ When WebSocket disconnects occur, check:
 
 ## Known issues and investigation history
 
-- **WebSocket disconnects every ~30 minutes** — Investigated in v1.10.5–v1.10.8. Conclusion: network-level drops between client and server (close code 1006), NOT server-side timeouts. The `127.0.0.1` disconnects in server logs are the Jellyfin web UI, NOT our client. Our client connects from the Mac's IP. To diagnose further, run `sudo tcpdump -i any -w ~/ws-capture.pcap host <server-ip> and port 8096` during playback.
+- **WebSocket disconnects every ~30 minutes** — Investigated in v1.10.5–v1.10.8. (A "planned refresh" watchdog shipped in v1.12.1 to preempt them and was removed in v1.12.4 after field reports showed it prevented nothing and disconnected the web UI's cast every 25 min — see the WebSocket behavior section.) Conclusion: network-level drops between client and server (close code 1006), NOT server-side timeouts. The `127.0.0.1` disconnects in server logs are the Jellyfin web UI, NOT our client. Our client connects from the Mac's IP. To diagnose further, run `sudo tcpdump -i any -w ~/ws-capture.pcap host <server-ip> and port 8096` during playback.
 - **`ws.close()` vs `ws.terminate()`** — `ws.close()` is correct. `ws.terminate()` was briefly tried based on wrong analysis of `127.0.0.1` logs (thought they were zombie connections, but they were the web UI). Reverted.
 - **Copilot review is useful** — GitHub Copilot found real issues: ForceKeepAlive data parsing (NaN from object format), noisyTypes inconsistency. Run `gh pr comment` or check PR reviews for Copilot feedback.
+- **Orphaned mpv processes survive unclean shutdowns** — `mpv --idle --keep-open` outlives its parent when the app is force-quit or a test run crashes (found in the wild: a 3.5-day-old orphan holding a stray window, PPID=1). The shim now quits any leftover mpv on its IPC socket at startup (`reapOrphanedMpv`), and the e2e suite sweeps test mpvs whose owning run is dead (`reapStaleTestMpvs`). When inspecting processes, check the socket path/PPID before assuming a live user session — an orphan's media title is just whatever it last played.
 - **Duplicate v1.10.10 tag** — PR #254 (bug audit) and PR #255 (SyncPlay) were both tagged v1.10.10. The tag ended up pointing to PR #255. Lesson: don't tag multiple PRs with the same version. v1.11.0 was released to properly version the SyncPlay feature.
 
 ## mpv IPC command reference
@@ -503,6 +505,8 @@ Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to 
 
 ## Testing approach
 
+**Test-run hygiene**: every shim the suite spawns gets `JELLYFIN_MPV_NO_DIALOGS=1` — a test with a broken config must never raise the native error dialog on the user's desktop (it once did: a misconfigured proxy test popped "Authentication Failed"). Ad-hoc test shims must set it too. Identity checks in the suite must use mpv's `path` (never `filename` — for stream URLs that is just `stream?static=true&ApiKey=…` and cannot contain the item id).
+
 **Automated tests** (`npm test`):
 
 - `tests/log-contracts.test.mjs` — verifies macOS app contract patterns exist in shim.js, error patterns present, log function signature, no conflicts between new and existing log lines
@@ -600,6 +604,8 @@ The shim handles three WebSocket message types: `Play`, `Playstate`, `GeneralCom
 **SupportedCommands** must use exact `GeneralCommandType` enum names from Jellyfin source (`MediaBrowser.Model/Session/GeneralCommandType.cs`). Wrong names cause 400 errors. `tests/quality.test.mjs` validates every advertised name against the Jellyfin 12.2 enum. Note: `ClientCapabilitiesDto` has no `SupportsSync`/`SupportsRemoteControl`/`SupportsContentUploading` fields (Jellyfin discards them) — SyncPlay works purely via WebSocket messages.
 
 **Shutdown**: Sends `SessionsStop` message before closing WebSocket to prevent zombie sessions.
+
+**Jellyfin 12 notes** (verified against a live 12.x server): stream URLs use `ApiKey=` casing (thumbfast parses both); `GET /Users` returns ALL users to any authenticated caller (use `/Users/Me` when you want the caller's own user — an old `users[1]` pick would grab the wrong one); Trickplay metadata is nested `{itemId: {width: info}}` (≤10.9 sent `{width: [info]}`) — thumbfast-jellyfin v1.1.3+ parses both; a session disappears from `/Sessions` while its WebSocket is down and reappears with the same id once reconnected (the e2e suite's findSession waits for exactly that).
 
 ## Historical context
 
