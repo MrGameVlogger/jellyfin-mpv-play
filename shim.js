@@ -209,6 +209,7 @@ let reconnectInterval = null;
 let isReconnecting = false;
 let reconnectAttempts = 0;
 let keepAliveInterval = null;
+let heartbeatInterval = null;
 let lastMessageReceivedAt = 0;
 let lastKeepAliveSentAt = 0;
 // Note: an earlier "planned connection refresh" watchdog closed and reopened
@@ -461,6 +462,10 @@ async function connectWebSocket() {
         clearInterval(keepAliveInterval);
         keepAliveInterval = null;
     }
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
 
     if (ws) {
         try {
@@ -487,6 +492,29 @@ async function connectWebSocket() {
             lastMessageReceivedAt = Date.now();
             lastKeepAliveSentAt = 0;
             log('info', 'ws', 'Connected to Jellyfin');
+
+            // NAT insurance: OS-level TCP keepalives on the raw socket.
+            if (ws._socket && typeof ws._socket.setKeepAlive === 'function') {
+                ws._socket.setKeepAlive(true, 20000);
+            }
+
+            // Dead-connection watchdog (ws docs: "How to detect and close
+            // broken connections"). A half-open TCP connection accepts our
+            // sends silently and can take many minutes to surface an error.
+            // Protocol pings generate pongs (verified: Kestrel auto-pongs),
+            // and the app-level KeepAlive echo counts too — any inbound frame
+            // proves the link. Two missed probes => terminate() (not close())
+            // to force the reconnect path immediately.
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                if (Date.now() - lastMessageReceivedAt > 35000) {
+                    log('info', 'ws', '💀 No inbound traffic for 35s — terminating dead connection');
+                    try { ws.terminate(); } catch (e) {}
+                    return;
+                }
+                try { ws.ping(); } catch (e) {}
+            }, 15000);
             
             // Show "connected" OSD if we were reconnecting
             if (wasReconnecting) {
@@ -533,7 +561,12 @@ async function connectWebSocket() {
         });
 
         ws.on('ping', (data) => {
+            lastMessageReceivedAt = Date.now();
             log('debug', 'ws', '🏓 Server ping received (ws auto-responds with pong)');
+        });
+
+        ws.on('pong', () => {
+            lastMessageReceivedAt = Date.now();
         });
 
         ws.on('error', (error) => {
@@ -551,6 +584,10 @@ async function connectWebSocket() {
             if (keepAliveInterval) {
                 clearInterval(keepAliveInterval);
                 keepAliveInterval = null;
+            }
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
             }
 
             scheduleReconnect();
