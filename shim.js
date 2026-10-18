@@ -53,7 +53,8 @@ const CONFIG = {
     headless: userConfig.headless || false,
     autoSkipIntros: userConfig.autoSkipIntros || false,
     disableSkipIntro: userConfig.disableSkipIntro || false,
-    verbose: userConfig.verbose || false
+    verbose: userConfig.verbose || false,
+    wsPresenceSocket: userConfig.wsPresenceSocket !== false
 };
 
 if (CONFIG.autoSkipIntros && CONFIG.disableSkipIntro) {
@@ -204,14 +205,78 @@ let currentPositionSeconds = 0;
 let isReportingStop = false;
 let accessToken = null;
 let userId = null;
-let ws = null;
-let reconnectInterval = null;
-let isReconnecting = false;
-let reconnectAttempts = 0;
-let keepAliveInterval = null;
-let heartbeatInterval = null;
-let lastMessageReceivedAt = 0;
-let lastKeepAliveSentAt = 0;
+function createWsSocket(role) {
+    return {
+        role,
+        ws: null,
+        keepAliveInterval: null,
+        heartbeatInterval: null,
+        reconnectInterval: null,
+        isReconnecting: false,
+        reconnectAttempts: 0,
+        lastMessageReceivedAt: 0,
+        lastKeepAliveSentAt: 0
+    };
+}
+
+// Jellyfin merges every WebSocket that authenticates with the same token+deviceId
+// into one session's socket list (WebSocketController._sockets) and only closes
+// the session when NO socket is left open (SessionManager.CloseIfNeededAsync).
+// A redundant "presence" socket therefore keeps the session in /Sessions through
+// a single-socket drop — which is exactly what stops jellyfin-web's sessionPlayer
+// plugin from dropping the cast: processUpdatedSessions() switches the web UI
+// back to the local player the moment the session is missing from a Sessions
+// broadcast, and it never re-attaches on its own.
+const wsSockets = {
+    primary: createWsSocket('primary'),
+    presence: createWsSocket('presence')
+};
+const seenMessageIds = new Set();
+let reauthInFlight = false;
+
+function anyWsOpen() {
+    return Object.values(wsSockets).some(s => s.ws && s.ws.readyState === WebSocket.OPEN);
+}
+
+function sendOnSocket(sock, obj) {
+    if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
+        try {
+            sock.ws.send(JSON.stringify(obj));
+            return true;
+        } catch (e) {
+            log('error', 'ws', 'Error sending message:', e.message);
+        }
+    }
+    return false;
+}
+
+// Outbound traffic may ride either socket — the server itself routes commands to
+// whichever socket was active most recently (WebSocketController.SendMessage).
+function sendWsMessage(obj) {
+    return sendOnSocket(wsSockets.primary, obj) || sendOnSocket(wsSockets.presence, obj);
+}
+
+function ensureSocketsConnected() {
+    for (const sock of Object.values(wsSockets)) {
+        const live = sock.ws && (sock.ws.readyState === WebSocket.OPEN || sock.ws.readyState === WebSocket.CONNECTING);
+        if (!live && !sock.isReconnecting) connectSocket(sock);
+    }
+}
+
+function closeAllWs() {
+    for (const sock of Object.values(wsSockets)) {
+        if (sock.keepAliveInterval) { clearInterval(sock.keepAliveInterval); sock.keepAliveInterval = null; }
+        if (sock.heartbeatInterval) { clearInterval(sock.heartbeatInterval); sock.heartbeatInterval = null; }
+        if (sock.reconnectInterval) { clearInterval(sock.reconnectInterval); sock.reconnectInterval = null; }
+        if (sock.ws) {
+            try {
+                sock.ws.removeAllListeners();
+                sock.ws.close();
+            } catch (e) {}
+            sock.ws = null;
+        }
+    }
+}
 // Note: an earlier "planned connection refresh" watchdog closed and reopened
 // this WebSocket on a timer. It is removed: the external cuts it aimed to
 // preempt are not connection-age-based (a drop was observed 5 minutes after a
@@ -451,77 +516,85 @@ function getAuthHeaders() {
     };
 }
 
-async function connectWebSocket() {
-    if (isReconnecting) {
+function connectSocket(sock) {
+    if (isShuttingDown || sock.isReconnecting) {
         return;
     }
-    
-    isReconnecting = true;
-    
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
+
+    sock.isReconnecting = true;
+
+    if (sock.keepAliveInterval) {
+        clearInterval(sock.keepAliveInterval);
+        sock.keepAliveInterval = null;
     }
-    if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-        heartbeatInterval = null;
+    if (sock.heartbeatInterval) {
+        clearInterval(sock.heartbeatInterval);
+        sock.heartbeatInterval = null;
     }
 
-    if (ws) {
+    if (sock.ws) {
         try {
-            ws.removeAllListeners();
-            ws.close();
+            sock.ws.removeAllListeners();
+            sock.ws.close();
         } catch (e) {
         }
-        ws = null;
+        sock.ws = null;
     }
-    
-    const wsUrl = CONFIG.serverUrl.replace(/^http/, 'ws') + `/socket?ApiKey=${accessToken}&deviceId=${CONFIG.deviceId}`;
-    
-    log('info', 'ws', '🔌 Connecting to Jellyfin...');
-    
-    try {
-        ws = new WebSocket(wsUrl);
-        
-        ws.on('open', () => {
-            log('info', 'ws', '✅ WebSocket connection established.');
-            const wasReconnecting = reconnectAttempts > 0;
-            isReconnecting = false;
-            reconnectAttempts = 0;
-            lastErrorOsdTime = 0;
-            lastMessageReceivedAt = Date.now();
-            lastKeepAliveSentAt = 0;
-            log('info', 'ws', 'Connected to Jellyfin');
 
-            // NAT insurance: OS-level TCP keepalives on the raw socket.
-            if (ws._socket && typeof ws._socket.setKeepAlive === 'function') {
-                ws._socket.setKeepAlive(true, 20000);
+    const wsUrl = CONFIG.serverUrl.replace(/^http/, 'ws') + `/socket?ApiKey=${accessToken}&deviceId=${CONFIG.deviceId}`;
+    const label = sock.role === 'presence' ? 'presence socket' : 'primary socket';
+
+    log('info', 'ws', sock.role === 'presence' ? '🔌 Connecting presence socket...' : '🔌 Connecting to Jellyfin...');
+
+    try {
+        sock.ws = new WebSocket(wsUrl);
+
+        sock.ws.on('open', () => {
+            // "WebSocket connection established" is a macapp log-line contract —
+            // emit it for the primary only; the presence socket logs its own line.
+            log('info', 'ws', sock.role === 'presence' ? '✅ Presence WebSocket established.' : '✅ WebSocket connection established.');
+            const wasReconnecting = sock.reconnectAttempts > 0;
+            sock.isReconnecting = false;
+            sock.reconnectAttempts = 0;
+            sock.lastMessageReceivedAt = Date.now();
+            sock.lastKeepAliveSentAt = 0;
+
+            if (sock.role === 'primary') {
+                lastErrorOsdTime = 0;
+                log('info', 'ws', 'Connected to Jellyfin');
             }
 
-            // Dead-connection watchdog (ws docs: "How to detect and close
-            // broken connections"). A half-open TCP connection accepts our
-            // sends silently and can take many minutes to surface an error.
-            // Protocol pings generate pongs (verified: Kestrel auto-pongs),
-            // and the app-level KeepAlive echo counts too — any inbound frame
-            // proves the link. Two missed probes => terminate() (not close())
-            // to force the reconnect path immediately.
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            heartbeatInterval = setInterval(() => {
-                if (!ws || ws.readyState !== WebSocket.OPEN) return;
-                if (Date.now() - lastMessageReceivedAt > 35000) {
-                    log('info', 'ws', '💀 No inbound traffic for 35s — terminating dead connection');
-                    try { ws.terminate(); } catch (e) {}
+            // NAT insurance: OS-level TCP keepalives on the raw socket.
+            if (sock.ws._socket && typeof sock.ws._socket.setKeepAlive === 'function') {
+                sock.ws._socket.setKeepAlive(true, 20000);
+            }
+
+            // Dead-connection watchdog (ws docs: "How to detect and close broken
+            // connections"). A half-open TCP connection accepts our sends silently
+            // and can take many minutes to surface an error. Protocol pings
+            // generate pongs (verified: Kestrel auto-pongs) and the app-level
+            // KeepAlive echo counts too — any inbound frame proves the link. Two
+            // missed probes => terminate() (not close()) to force reconnect now.
+            if (sock.heartbeatInterval) clearInterval(sock.heartbeatInterval);
+            sock.heartbeatInterval = setInterval(() => {
+                if (!sock.ws || sock.ws.readyState !== WebSocket.OPEN) return;
+                if (Date.now() - sock.lastMessageReceivedAt > 35000) {
+                    log('info', 'ws', `💀 No inbound traffic for 35s — terminating dead ${label}`);
+                    try { sock.ws.terminate(); } catch (e) {}
                     return;
                 }
-                try { ws.ping(); } catch (e) {}
+                try { sock.ws.ping(); } catch (e) {}
             }, 15000);
-            
-            // Show "connected" OSD if we were reconnecting
-            if (wasReconnecting) {
+
+            // Only announce recovery (and rehydrate) when this socket restored the
+            // last surviving link — a single-socket swap is invisible to the user
+            // and to the web UI, which never saw the session leave.
+            const other = sock.role === 'primary' ? wsSockets.presence : wsSockets.primary;
+            const otherOpen = other.ws && other.ws.readyState === WebSocket.OPEN;
+            if (wasReconnecting && !otherOpen) {
                 showErrorOsd('Reconnected');
-                // Rehydrate the session immediately so the web UI's cast menu
-                // and remote controls show correct state the moment the session
-                // reappears, instead of waiting for the next 10s progress tick.
+                // Rehydrate immediately so the web UI's cast menu and remote
+                // controls show correct state the moment the session reappears.
                 if (currentItemId && mpvProcess) {
                     try {
                         const posTicks = Math.round((currentPositionSeconds || 0) * 10000000);
@@ -529,102 +602,117 @@ async function connectWebSocket() {
                     } catch (e) {}
                 }
             }
-            
-            const msg = {
-                MessageType: "SessionsStart",
-                Data: "0,1500"
-            };
-            ws.send(JSON.stringify(msg));
-            log('info', 'ws', '📤 SessionsStart message sent');
-            reportCapabilities();
-            
-            keepAliveInterval = setInterval(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
+
+            // SessionsStart is per-connection (BasePeriodicWebSocketListener only
+            // pushes to subscribed sockets) — subscribe on the primary so Sessions
+            // broadcasts arrive as a single copy.
+            if (sock.role === 'primary') {
+                sendOnSocket(sock, { MessageType: 'SessionsStart', Data: '0,1500' });
+                log('info', 'ws', '📤 SessionsStart message sent');
+                reportCapabilities();
+            }
+
+            // The server stamps LastKeepAliveDate ONLY on inbound KeepAlive
+            // messages (WebSocketConnection.SendKeepAliveResponse) — each socket
+            // must feed itself or the server disposes it after 60s of silence.
+            sock.keepAliveInterval = setInterval(() => {
+                if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
                     try {
-                        ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
-                        lastKeepAliveSentAt = Date.now();
+                        sock.ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
+                        sock.lastKeepAliveSentAt = Date.now();
                         log('debug', 'ws', '💓 Keep-alive sent');
                     } catch (e) {
                         log('error', 'ws', 'Error sending keep-alive:', e.message);
                     }
                 }
             }, 30000);
-            
-            if (reconnectInterval) {
-                clearTimeout(reconnectInterval);
-                reconnectInterval = null;
+
+            if (sock.reconnectInterval) {
+                clearInterval(sock.reconnectInterval);
+                sock.reconnectInterval = null;
             }
         });
 
-        ws.on('message', (data) => {
-            lastMessageReceivedAt = Date.now();
+        sock.ws.on('message', (data) => {
+            sock.lastMessageReceivedAt = Date.now();
             try {
                 const msg = JSON.parse(data);
+                // Both sockets share one session; guard against any fan-out
+                // delivering the same envelope twice (MessageId is the Guid on
+                // every OutboundWebSocketMessage).
+                if (msg.MessageId) {
+                    if (seenMessageIds.has(msg.MessageId)) return;
+                    seenMessageIds.add(msg.MessageId);
+                    if (seenMessageIds.size > 200) {
+                        seenMessageIds.delete(seenMessageIds.values().next().value);
+                    }
+                }
                 if (!NOISY_WS_TYPES.includes(msg.MessageType)) {
                     log('info', 'ws', 'Message received:', msg.MessageType);
                 }
-                handleMessage(msg).catch(e => log('error', 'ws', 'Error handling message:', e.message));
+                handleMessage(sock, msg).catch(e => log('error', 'ws', 'Error handling message:', e.message));
             } catch (e) {
                 log('error', 'ws', 'Error parsing message:', e.message);
             }
         });
 
-        ws.on('ping', (data) => {
-            lastMessageReceivedAt = Date.now();
+        sock.ws.on('ping', (data) => {
+            sock.lastMessageReceivedAt = Date.now();
             log('debug', 'ws', '🏓 Server ping received (ws auto-responds with pong)');
         });
 
-        ws.on('pong', () => {
-            lastMessageReceivedAt = Date.now();
+        sock.ws.on('pong', () => {
+            sock.lastMessageReceivedAt = Date.now();
         });
 
-        ws.on('error', (error) => {
+        sock.ws.on('error', (error) => {
             log('error', 'ws', `WebSocket error: ${error.message} (code: ${error.code || 'none'})`);
-            isReconnecting = false;
+            sock.isReconnecting = false;
         });
 
-        ws.on('close', (code, reason) => {
+        sock.ws.on('close', (code, reason) => {
             const now = Date.now();
-            const sinceLastMessage = lastMessageReceivedAt ? Math.round((now - lastMessageReceivedAt) / 1000) : 'unknown';
-            const sinceLastKeepAlive = lastKeepAliveSentAt ? Math.round((now - lastKeepAliveSentAt) / 1000) : 'unknown';
-            log('info', 'ws', `Disconnected from server — code: ${code}, reason: "${reason || 'none'}", since last message: ${sinceLastMessage}s, since last keepalive: ${sinceLastKeepAlive}s`);
-            isReconnecting = false;
-            
-            if (keepAliveInterval) {
-                clearInterval(keepAliveInterval);
-                keepAliveInterval = null;
+            const sinceLastMessage = sock.lastMessageReceivedAt ? Math.round((now - sock.lastMessageReceivedAt) / 1000) : 'unknown';
+            const sinceLastKeepAlive = sock.lastKeepAliveSentAt ? Math.round((now - sock.lastKeepAliveSentAt) / 1000) : 'unknown';
+            log('info', 'ws', `${sock.role === 'presence' ? 'Presence socket disconnected' : 'Disconnected from server'} — code: ${code}, reason: "${reason || 'none'}", since last message: ${sinceLastMessage}s, since last keepalive: ${sinceLastKeepAlive}s`);
+            sock.isReconnecting = false;
+
+            if (sock.keepAliveInterval) {
+                clearInterval(sock.keepAliveInterval);
+                sock.keepAliveInterval = null;
             }
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-                heartbeatInterval = null;
+            if (sock.heartbeatInterval) {
+                clearInterval(sock.heartbeatInterval);
+                sock.heartbeatInterval = null;
             }
 
-            scheduleReconnect();
+            scheduleReconnect(sock);
         });
-        
+
     } catch (error) {
         log('error', 'ws', '❌ Error creating WebSocket:', error.message);
-        isReconnecting = false;
-        scheduleReconnect();
+        sock.isReconnecting = false;
+        scheduleReconnect(sock);
     }
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(sock) {
     if (isShuttingDown) {
         return;
     }
-    if (reconnectInterval) {
+    if (sock.reconnectInterval) {
         return;
     }
-    
-    reconnectAttempts++;
 
-    // Only show OSD after first retry fails (avoids flashing on brief network blips)
-    if (reconnectAttempts > 1) {
+    sock.reconnectAttempts++;
+
+    // Only announce a lost connection when the session itself is gone (no socket
+    // left open) — a single-socket drop is invisible to the user and the web UI.
+    if (sock.reconnectAttempts > 1 && !anyWsOpen()) {
         showErrorOsd('Connection lost — reconnecting...');
     }
 
-    log('info', 'ws', `🔄 Reconnecting — probing server every 1s (Attempt ${reconnectAttempts})...`);
+    log('info', 'ws', `🔄 Reconnecting ${sock.role} socket — probing server every 1s (Attempt ${sock.reconnectAttempts})...`);
 
     // Hot recovery: the drops we see are short server-side outages (5-30s).
     // Probing every 1s means we escape within ~1s of the server coming back,
@@ -636,15 +724,15 @@ function scheduleReconnect() {
     let connectFailures = 0;
     let connectNotBefore = 0;
 
-    reconnectInterval = setInterval(async () => {
+    sock.reconnectInterval = setInterval(async () => {
         if (isShuttingDown) {
-            clearInterval(reconnectInterval);
-            reconnectInterval = null;
+            clearInterval(sock.reconnectInterval);
+            sock.reconnectInterval = null;
             return;
         }
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            clearInterval(reconnectInterval);
-            reconnectInterval = null;
+        if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
+            clearInterval(sock.reconnectInterval);
+            sock.reconnectInterval = null;
             return;
         }
         if (probeBusy) return;
@@ -666,28 +754,31 @@ function scheduleReconnect() {
                 const paceSeconds = Math.min(30, Math.pow(1.5, connectFailures - 1));
                 connectNotBefore = Date.now() + paceSeconds * 1000;
                 log('info', 'ws', '✅ Network connection active. Attempting WebSocket reconnection...');
-                await connectWebSocket();
+                connectSocket(sock);
             }
         } catch (error) {
             if (error.response && error.response.status === 401) {
-                clearInterval(reconnectInterval);
-                reconnectInterval = null;
+                clearInterval(sock.reconnectInterval);
+                sock.reconnectInterval = null;
+                if (reauthInFlight) return;
+                reauthInFlight = true;
                 log('info', 'auth', '🔐 Token expired, reauthenticating...');
                 showErrorOsd('Authentication expired — reconnecting...');
                 const authenticated = await authenticateUser();
+                reauthInFlight = false;
                 if (authenticated) {
-                    await connectWebSocket();
+                    ensureSocketsConnected();
                 } else {
                     log('error', 'auth', '❌ Reauthentication failed. Waiting for next attempt.');
                     showErrorOsd('Authentication failed');
-                    scheduleReconnect();
+                    scheduleReconnect(sock);
                 }
                 return;
             }
             if (!serverSeenDown) {
                 serverSeenDown = true;
                 log('warn', 'ws', '⚠️ Server unavailable or network down. Probing every 1s...');
-                showErrorOsd('Server unreachable — retrying...');
+                if (!anyWsOpen()) showErrorOsd('Server unreachable — retrying...');
             }
         } finally {
             probeBusy = false;
@@ -736,7 +827,7 @@ function reportCapabilities() {
         });
 }
 
-async function handleMessage(msg) {
+async function handleMessage(sock, msg) {
     if (msg.MessageType === "KeepAlive") {
         log('debug', 'ws', '💓 Server echoed our KeepAlive back');
         return;
@@ -750,11 +841,11 @@ async function handleMessage(msg) {
         const safeInterval = Number.isFinite(interval) && interval > 0 ? interval : 30;
         log('info', 'ws', `Server requested keep-alive every ${safeInterval}s`);
         
-        // Immediately respond to ForceKeepAlive
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        // Immediately respond to ForceKeepAlive on the socket that received it
+        if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
             try {
-                ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
-                lastKeepAliveSentAt = Date.now();
+                sock.ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
+                sock.lastKeepAliveSentAt = Date.now();
                 log('debug', 'ws', '💓 Keep-alive sent (immediate response)');
             } catch (e) {
                 log('error', 'ws', 'Error sending keep-alive:', e.message);
@@ -763,13 +854,13 @@ async function handleMessage(msg) {
         
         // Set up periodic keep-alive at half the server's requested interval
         // to avoid race conditions with server timeout checks
-        if (keepAliveInterval) clearInterval(keepAliveInterval);
+        if (sock.keepAliveInterval) clearInterval(sock.keepAliveInterval);
         const keepAliveMs = Math.min(safeInterval * 500, 30000); // Half the server's interval, cap at 30s
-        keepAliveInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
+        sock.keepAliveInterval = setInterval(() => {
+            if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
                 try {
-                    ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
-                    lastKeepAliveSentAt = Date.now();
+                    sock.ws.send(JSON.stringify({ MessageType: 'KeepAlive' }));
+                    sock.lastKeepAliveSentAt = Date.now();
                     log('debug', 'ws', '💓 Keep-alive sent');
                 } catch (e) {
                     log('error', 'ws', 'Error sending keep-alive:', e.message);
@@ -1195,9 +1286,7 @@ async function handleMessage(msg) {
         // Respond with current UTC time for SyncPlay clock synchronization
         const utcTime = new Date().toISOString();
         log('debug', 'syncplay', `GetUTCTime request, responding: ${utcTime}`);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ MessageType: 'GetUTCTimeResponse', Data: utcTime }));
-        }
+        sendWsMessage({ MessageType: 'GetUTCTimeResponse', Data: utcTime });
     }
     else if (msg.MessageType === "ActivityLogEntry") {
         const entry = msg.Data || {};
@@ -3007,8 +3096,11 @@ function shutdown(signal) {
     stopProgressPoll();
     for (const [, q] of pendingQueries) { if (q.timer) clearTimeout(q.timer); q.resolve(null); }
     pendingQueries.clear();
-    if (reconnectInterval) { clearTimeout(reconnectInterval); reconnectInterval = null; }
-    if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
+    for (const sock of Object.values(wsSockets)) {
+        if (sock.reconnectInterval) { clearInterval(sock.reconnectInterval); sock.reconnectInterval = null; }
+        if (sock.keepAliveInterval) { clearInterval(sock.keepAliveInterval); sock.keepAliveInterval = null; }
+        if (sock.heartbeatInterval) { clearInterval(sock.heartbeatInterval); sock.heartbeatInterval = null; }
+    }
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
     
     if (currentItemId && isUnwatchedQuit) {
@@ -3026,18 +3118,14 @@ function shutdown(signal) {
             sendMpvCommand('quit');
             setTimeout(() => {
                 killMpv();
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    try { ws.send(JSON.stringify({ MessageType: 'SessionsStop' })); } catch (e) {}
-                }
-                if (ws) ws.close();
+                sendWsMessage({ MessageType: 'SessionsStop' });
+                closeAllWs();
                 setTimeout(() => process.exit(0), 500);
             }, 1000);
         } else {
             killMpv();
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send(JSON.stringify({ MessageType: 'SessionsStop' })); } catch (e) {}
-            }
-            if (ws) ws.close();
+            sendWsMessage({ MessageType: 'SessionsStop' });
+            closeAllWs();
             setTimeout(() => process.exit(0), 500);
         }
     };
@@ -3302,11 +3390,11 @@ async function main() {
                     process.exit(1);
                 }
             }
-            // Network errors fall through — connectWebSocket's reconnect flow handles them
+            // Network errors fall through — the reconnect probe loop handles them
         }
     }
     
-    await connectWebSocket();
+    ensureSocketsConnected();
     
     log('info', 'main', '\n✅ Script started correctly');
     log('info', 'main', '💡 Open Jellyfin in your browser and use "Play on" to select this device.');

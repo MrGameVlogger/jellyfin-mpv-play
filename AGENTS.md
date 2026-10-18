@@ -89,6 +89,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 - **Watched threshold**: Item marked watched at 90% of runtime.
 - **EOF detection**: Observes `eof-reached` property (ID 8). Logs item ID, position, duration, queue index, and whether it's the last item. This is more reliable than the progress poll's position-based check for triggering auto-close.
 - **Reconnection**: hot-probe loop on disconnect — `GET /System/Info` every 1s and connect the moment it answers, so a 5-30s outage costs ~1s of extra gap instead of a backoff slot (up to 30s). WS connect attempts are paced exponentially (1s × 1.5, 30s cap — jellyfin-web SDK shape) so a broken WS endpoint isn't hammered. On reconnect the shim immediately re-reports playback progress so the session reappears with `NowPlayingItem` set.
+- **Redundant presence socket (the web-UI cast fix).** Jellyfin merges every WebSocket with the same token+deviceId into one session's socket list (`WebSocketController._sockets`) and closes the session only when NO socket is open (`SessionManager.CloseIfNeededAsync`). The shim therefore keeps a second ("presence") connection open: a single-socket drop never removes the session from `/Sessions`, which is the exact condition for jellyfin-web's `sessionPlayer` plugin (`processUpdatedSessions`) to drop the cast selection and playback controls — it flips to the local player the moment the session is missing from a `Sessions` broadcast and never re-attaches on its own. Commands are single-delivered to the most recently active socket (`MaxBy(LastActivityDate)`) so both sockets must process messages (MessageId LRU dedupe guards any fan-out). `SessionsStart` is per-connection — only the primary subscribes. Disable via `wsPresenceSocket: false`.
 - **Dead-connection watchdog (client-side)**: protocol-level `ws.ping()` every 15s; any inbound frame (pong, app KeepAlive echo, any message) counts as liveness proof. If nothing arrives for 35s the socket is `terminate()`d (NOT `close()`d — the ws docs' "How to detect and close broken connections" pattern) to force the reconnect path immediately. A half-open TCP connection otherwise accepts our sends silently and can take many minutes to surface an error. Verified live: Kestrel auto-pongs protocol pings. TCP keepalive (20s) is also enabled on the raw socket as NAT insurance.
 - **Only `KeepAlive` messages refresh the server's `LastKeepAliveDate`.** In `WebSocketConnection.SendKeepAliveResponse` the server stamps it on every inbound `KeepAlive` message; other traffic does not count. Keep the app-level KeepAlive cadence at ≤30s (server ForceKeepAlive nudges at 45s of silence, disposes the socket at 60s).
 - **No planned refresh, ever.** v1.12.1 added a watchdog that closed/reopened the socket every ~25 min to preempt external cuts. It was removed in v1.12.4: the cuts are not connection-age-based (a 1006 drop was logged 5 min after a refresh), while every refresh was a client-visible disconnect — the Jellyfin web UI drops its cast selection and playback controls on it (progress/watched marking are HTTP and unaffected). Users with healthy connections got a cast-disconnect every 25 minutes. Do not reintroduce a keep-alive-reconnect without evidence that the cuts are age-based.
@@ -195,6 +196,7 @@ All options go in `config.js` (copy from `config.example.js`):
 | `autoSkipIntros` | boolean | `false` | Auto-skip intros/outros after 3s (or show "Press S to skip" OSD) |
 | `disableSkipIntro` | boolean | `false` | Completely disable intro/outro skip feature (hides prompts, no S key) |
 | `verbose` | boolean | `false` | Show debug-level logs with timestamps and component names |
+| `wsPresenceSocket` | boolean | `true` | Redundant second WebSocket so the session survives a single-socket drop (keeps the web UI's cast alive) |
 
 `config.js` is gitignored. Missing file → `MODULE_NOT_FOUND` on start.
 
@@ -221,7 +223,9 @@ All functions live in `shim.js`. There are no classes — the entire app is proc
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `connectWebSocket()` | 456 | Establishes WS connection, sets up message handler, starts keep-alive |
+| `connectSocket(sock)` | — | Establishes one WS connection (primary/presence), message handler, keep-alive, watchdog |
+| `ensureSocketsConnected()` | — | Connects any socket that is down (boot, post-reauth) |
+| `sendWsMessage(obj)` / `sendOnSocket(sock, obj)` | — | Outbound WS traffic (primary preferred; per-socket for subscriptions) |
 | `scheduleReconnect()` | 595 | Reconnect backoff matching jellyfin-web's SDK (1s × 1.5, 30s cap) |
 | `handleMessage(msg)` | 700 | Main WS message dispatcher — handles Play, Playstate, GeneralCommand |
 | `reportCapabilities()` | 659 | Registers session capabilities with Jellyfin |
@@ -370,14 +374,9 @@ All state is module-level variables. No state machine or stores — just mutable
 |----------|------|---------|
 | `accessToken` | string | Jellyfin JWT token |
 | `userId` | string | Jellyfin user ID |
-| `ws` | WebSocket | Connection to Jellyfin server |
-| `reconnectAttempts` | number | Current backoff level (resets on successful connect) |
-| `isReconnecting` | boolean | True during reconnection attempt |
-| `reconnectInterval` | Timer | Hot-recovery probe loop (1s) while disconnected |
-| `keepAliveInterval` | Timer | WebSocket keep-alive interval |
-| `heartbeatInterval` | Timer | Dead-connection watchdog: 15s protocol pings, 35s silence → `terminate()` |
-| `lastMessageReceivedAt` | number | Timestamp of last message from server (for disconnect diagnosis) |
-| `lastKeepAliveSentAt` | number | Timestamp of last KeepAlive sent (for disconnect diagnosis) |
+| `wsSockets` | object | `{primary, presence}` socket records (ws, timers, per-socket backoff/diagnostic state) |
+| `seenMessageIds` | Set | MessageId LRU (cap 200) — dedupe guard for any cross-socket fan-out |
+| `reauthInFlight` | boolean | Prevents concurrent reauth when both sockets' probes hit 401 |
 
 ### Constants
 
@@ -482,7 +481,7 @@ Use patterns like:
 
 ### WebSocket disconnect
 
-`scheduleReconnect()` starts a 1s probe loop (`GET /System/Info`, 800ms timeout) that connects the moment the server answers; WS connect attempts within it are paced 1s × 1.5 (30s cap). Logs "Server unavailable" only on the down-transition (no 1Hz spam). Resets `reconnectAttempts` on successful connect. `isReconnecting` prevents duplicate reconnection attempts. 401 from the probe triggers reauth before connecting.
+`scheduleReconnect(sock)` starts a per-socket 1s probe loop (`GET /System/Info`, 800ms timeout) that connects the moment the server answers; WS connect attempts within it are paced 1s × 1.5 (30s cap). Logs "Server unavailable" only on the down-transition (no 1Hz spam). 401 from the probe triggers reauth (guarded by `reauthInFlight`) then `ensureSocketsConnected()`. OSDs only announce a lost connection when NO socket is open — single-socket swaps are silent.
 
 ### MPV process crash
 
@@ -507,6 +506,8 @@ Use patterns like:
 Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to ensure clean exit.
 
 ## Testing approach
+
+**WS resilience tests**: test 33 proves the server mechanism with raw sockets (two sockets = one session; session survives one close, dies with the last); test 34 is the user-visible acceptance test — the shim runs behind a TCP proxy in the suite and one connection is killed mid-flight while `/Sessions` is polled continuously (it must never blip). The proxy (`startWsProxy`) is also the pattern to reuse for any future network-glitch simulation.
 
 **Test-run hygiene**: every shim the suite spawns gets `JELLYFIN_MPV_NO_DIALOGS=1` — a test with a broken config must never raise the native error dialog on the user's desktop (it once did: a misconfigured proxy test popped "Authentication Failed"). Ad-hoc test shims must set it too. Identity checks in the suite must use mpv's `path` (never `filename` — for stream URLs that is just `stream?static=true&ApiKey=…` and cannot contain the item id).
 
@@ -563,6 +564,8 @@ Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to 
 
 stderr is also routed through `processLogLine` (prefixed with `STDERR:`), so error markers in stderr trigger error notifications.
 
+Only the **primary** socket emits `WebSocket connection established` (contract line) and `Connected to Jellyfin`; the presence socket logs `Presence WebSocket established` / `Presence socket disconnected` — deliberately NOT containing any contract pattern so the macapp state is driven by the primary alone.
+
 Title format for `Episode detected`: `SeriesName - SxEp - EpisodeName` (assembled at the call site in `getEpisodeInfo()`). Next/prev episode logs use the same format. `Starting episode:` carries the bare item title (movies/music).
 
 ## Gotchas
@@ -608,7 +611,7 @@ The shim handles three WebSocket message types: `Play`, `Playstate`, `GeneralCom
 
 **Shutdown**: Sends `SessionsStop` message before closing WebSocket to prevent zombie sessions.
 
-**Jellyfin 12 notes** (verified against a live 12.x server): stream URLs use `ApiKey=` casing (thumbfast parses both); `GET /Users` returns ALL users to any authenticated caller (use `/Users/Me` when you want the caller's own user — an old `users[1]` pick would grab the wrong one); Trickplay metadata is nested `{itemId: {width: info}}` (≤10.9 sent `{width: [info]}`) — thumbfast-jellyfin v1.1.3+ parses both; a session disappears from `/Sessions` while its WebSocket is down and reappears with the same id once reconnected (the e2e suite's findSession waits for exactly that).
+**Jellyfin 12 notes** (verified against a live 12.x server): stream URLs use `ApiKey=` casing (thumbfast parses both); `GET /Users` returns ALL users to any authenticated caller (use `/Users/Me` when you want the caller's own user — an old `users[1]` pick would grab the wrong one); Trickplay metadata is nested `{itemId: {width: info}}` (≤10.9 sent `{width: [info]}`) — thumbfast-jellyfin v1.1.3+ parses both; a session disappears from `/Sessions` only when ALL of its WebSockets are down and reappears with the same id once any reconnects (the e2e suite's findSession waits for exactly that; tests 33-34 pin the dual-socket behavior).
 
 ## Historical context
 

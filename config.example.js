@@ -58,4 +58,11 @@ module.exports = {
     // Verbose logging (optional — default: false)
     // Show debug-level logs with timestamps and component names
     // verbose: true,
+
+    // Redundant presence WebSocket (optional — default: true)
+    // Keeps a second connection to the server so the session stays listed in
+    // /Sessions through a single-socket drop — the Jellyfin web UI otherwise
+    // drops its cast selection and playback controls. Set false for a single
+    // connection (you lose the drop protection).
+    // wsPresenceSocket: false,
 };

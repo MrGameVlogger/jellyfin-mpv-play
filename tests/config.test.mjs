@@ -56,7 +56,8 @@ test('CONFIG object in shim.js has all expected properties', () => {
     'headless',
     'autoSkipIntros',
     'disableSkipIntro',
-    'verbose'
+    'verbose',
+    'wsPresenceSocket'
   ];
 
   for (const key of expectedConfig) {
@@ -84,7 +85,8 @@ test('config.example.js documents all CONFIG options', () => {
     'headless',
     'autoSkipIntros',
     'disableSkipIntro',
-    'verbose'
+    'verbose',
+    'wsPresenceSocket'
   ];
 
   for (const option of documentedOptions) {
