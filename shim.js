@@ -211,16 +211,12 @@ let reconnectAttempts = 0;
 let keepAliveInterval = null;
 let lastMessageReceivedAt = 0;
 let lastKeepAliveSentAt = 0;
-let wsConnectedAt = 0;
-let plannedReconnect = false;
-// Observed on real deployments: something in the path cuts idle-looking long-lived
-// TCP connections every ~30-35 min with code 1006 (no close frame — measured from
-// 28 consecutive drops; not Jellyfin's keep-alive logic, which we satisfy, and not
-// token expiry — reconnects succeed with the same token). A planned reconnect well
-// before that window turns an abrupt 5-20s outage into a ~1s clean blip and keeps
-// the link fresh enough that nothing in the path sees a "stale" connection.
-// Override for testing: JELLYFIN_MPV_WS_REFRESH_MIN=2
-const WS_REFRESH_MS = (parseInt(process.env.JELLYFIN_MPV_WS_REFRESH_MIN, 10) || 25) * 60 * 1000;
+// Note: an earlier "planned connection refresh" watchdog closed and reopened
+// this WebSocket on a timer. It is removed: the external cuts it aimed to
+// preempt are not connection-age-based (a drop was observed 5 minutes after a
+// refresh), while every refresh was a real disconnect for the client — the
+// Jellyfin web UI drops its cast selection and playback controls on each one,
+// which hit users with perfectly healthy connections hardest.
 
 const NOISY_WS_TYPES = ['KeepAlive', 'RefreshProgress', 'Sessions'];
 
@@ -484,7 +480,6 @@ async function connectWebSocket() {
         
         ws.on('open', () => {
             log('info', 'ws', '✅ WebSocket connection established.');
-            wsConnectedAt = Date.now();
             const wasReconnecting = reconnectAttempts > 0;
             isReconnecting = false;
             reconnectAttempts = 0;
@@ -558,14 +553,6 @@ async function connectWebSocket() {
                 keepAliveInterval = null;
             }
 
-            if (plannedReconnect) {
-                // Our own scheduled refresh: reconnect immediately (no backoff,
-                // no "Connection lost" OSD) so the gap is ~1s instead of 5-20s.
-                plannedReconnect = false;
-                connectWebSocket();
-                return;
-            }
-            
             scheduleReconnect();
         });
         
@@ -575,23 +562,6 @@ async function connectWebSocket() {
         scheduleReconnect();
     }
 }
-
-// Watchdog: proactively refresh the WebSocket before the network/server cuts it
-// (see WS_REFRESH_MS above). Runs every minute; only acts when the connection has
-// been up past the refresh window and nothing is mid-transaction that a blip
-// would disturb more than the abrupt cut would.
-setInterval(() => {
-    if (isShuttingDown || plannedReconnect) return;
-    if (ws && ws.readyState === WebSocket.OPEN && wsConnectedAt && Date.now() - wsConnectedAt > WS_REFRESH_MS) {
-        log('info', 'ws', '🔄 Planned connection refresh (long-lived connections are cut externally ~every 30 min)');
-        plannedReconnect = true;
-        try {
-            ws.close(1000, 'Planned refresh');
-        } catch (e) {
-            plannedReconnect = false;
-        }
-    }
-}, 15000);
 
 function scheduleReconnect() {
     if (isShuttingDown) {
