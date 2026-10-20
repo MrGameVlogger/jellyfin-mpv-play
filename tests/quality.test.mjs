@@ -211,6 +211,30 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
   );
 });
 
+test('fetchEpisodeInfo returns the full payload for every item type', () => {
+  const shim = fs.readFileSync('shim.js', 'utf8');
+  const start = shim.indexOf('async function fetchEpisodeInfo');
+  assert(start !== -1, 'fetchEpisodeInfo not found');
+  const end = shim.indexOf('\nasync function ', start + 1);
+  const body = shim.slice(start, end === -1 ? undefined : end);
+
+  // Both item-type branches must share one payload — mediaStreams in
+  // particular, since pushOscState and the stream index mapping read it.
+  // Movies once omitted it, which hid every audio/subtitle option in the OSC.
+  assert(
+    body.includes('mediaStreams: item.MediaStreams || []'),
+    'fetchEpisodeInfo must populate mediaStreams for all item types'
+  );
+  assert(
+    body.includes('...info,'),
+    'fetchEpisodeInfo episode branch must spread the shared payload'
+  );
+  assert(
+    body.includes('return info;'),
+    'fetchEpisodeInfo non-episode branch must return the shared payload'
+  );
+});
+
 test('macos app matches the shim log contracts', () => {
   const shim = fs.readFileSync('shim.js', 'utf8');
   const npm = fs.readFileSync('macapp/Sources/NodeProcessManager.swift', 'utf8');
