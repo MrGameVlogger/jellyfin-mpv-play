@@ -294,6 +294,8 @@ All functions live in `shim.js`. There are no classes — the entire app is proc
 
 Note on `unwatched-quit`: quits without saving a resume position anywhere (no local save, stop report at position 0) and resets the item to unwatched in Jellyfin. The `sub_style` state reports MPV's live values, so mpv.conf settings show through as current; for ASS/SSA tracks the colour reads `Style` until one is forced, since their colour comes from the subtitle style rather than `sub-color`.
 
+Note on Tier 1 track lists: the `subtitles`/`audio` arrays come from `currentEpisodeInfo.mediaStreams`, which `fetchEpisodeInfo()` populates for **every** item type via its shared payload (Episode branch spreads `...info` and adds series-only fields). Never make that payload lopsided — a movie that omitted `mediaStreams` once hid every audio/subtitle option in the OSC. `tests/quality.test.mjs` guards this.
+
 ### Utility functions
 
 | Function | Line | Description |

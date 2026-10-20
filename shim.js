@@ -1325,6 +1325,21 @@ async function fetchEpisodeInfo(itemId, silent = false) {
     });
     const item = response.data;
 
+    // Shared payload for EVERY item type — series-only fields are layered on
+    // below. Keep both branches returning this shape so no type is lopsided
+    // (e.g. mediaStreams missing for movies broke the OSC track lists and the
+    // stream index <-> mpv id mapping fallbacks).
+    const playableTypes = ['Episode', 'Movie', 'Video', 'MusicVideo', 'Audio'];
+    const info = {
+        isSeries: false,
+        playable: playableTypes.includes(item.Type),
+        type: item.Type,
+        title: item.Name || 'Movie/Music',
+        itemRuntime: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
+        userData: item.UserData || {},
+        mediaStreams: item.MediaStreams || []
+    };
+
     if (item.Type === 'Episode') {
         const seasonResponse = await axios.get(`${CONFIG.serverUrl}/Shows/${item.SeriesId}/Episodes`, {
             headers,
@@ -1342,6 +1357,7 @@ async function fetchEpisodeInfo(itemId, silent = false) {
         if (!silent) log('info', 'episode', `📺 Episode detected: ${epLogTitle}`);
 
         return {
+            ...info,
             isSeries: true,
             playable: true,
             seriesId: item.SeriesId,
@@ -1352,25 +1368,14 @@ async function fetchEpisodeInfo(itemId, silent = false) {
             seriesName: item.SeriesName,
             seasonNumber: item.ParentIndexNumber,
             episodeNumber: item.IndexNumber,
-            title: epName,
-            itemRuntime: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
-            userData: item.UserData || {},
-            mediaStreams: item.MediaStreams || []
+            title: epName
         };
     }
 
-    const playableTypes = ['Episode', 'Movie', 'Video', 'MusicVideo', 'Audio'];
-    const title = item.Name || 'Movie/Music';
     // Non-episode items have no "Episode detected" line — this is the title
     // contract the macOS app parses for movies/music (see AGENTS.md log contracts)
-    if (!silent) log('info', 'episode', `▶️ Starting episode: ${title}`);
-    return {
-        isSeries: false,
-        playable: playableTypes.includes(item.Type),
-        title: title,
-        itemRuntime: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
-        userData: item.UserData || {}
-    };
+    if (!silent) log('info', 'episode', `▶️ Starting episode: ${info.title}`);
+    return info;
 }
 
 async function getIntroSegments(itemId) {
@@ -2899,7 +2904,7 @@ async function pushOscState(hasMedia = true) {
         ? -1
         : (typeof activeAudio === 'number' ? mpvTrackIdToJellyfinIndex(activeAudio, 'Audio') : undefined);
 
-    if (currentEpisodeInfo?.mediaStreams) {
+    if (Array.isArray(currentEpisodeInfo?.mediaStreams)) {
         const subtitles = currentEpisodeInfo.mediaStreams
             .filter(s => s.Type === 'Subtitle')
             .map(s => ({
