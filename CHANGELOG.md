@@ -18,6 +18,18 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.15.0
+
+### Features
+- **Bundled Node.js moved to 24 LTS (24.22.1)** across all three platform bundles. Node 22 (Jod) reaches end-of-life in April 2027 — too short a runway for a self-contained bundle — while Node 24 (Krypton) is the newest LTS and is supported until ~April 2028. The shim only uses stable APIs (`ws`, `axios`, `child_process`, `net`, `fs`), so the runtime move is transparent to playback behavior. Node 26 remains out of scope until its LTS designation lands and a deliberate evaluation says go.
+
+### Internal
+- **Bundled Node.js pin is now kept in lockstep by test.** The `NODE_VERSION` pin lives in two places (`macapp/build.sh` for the macOS bundle, `.github/workflows/build.yml` for the Linux/Windows bundles) and they must match. `tests/quality.test.mjs` now enforces that, closing the drift class where one platform could ship a different runtime than the others.
+- **Automated Node.js LTS tracking.** A weekly workflow (`.github/workflows/node-lts-bump.yml`) compares the pin against the official Node.js release index and opens a PR for same-major LTS patch updates — bumping both pin locations together — or an evaluation issue when a newer LTS major appears. Major runtime moves stay deliberate; patches no longer wait for a manual CVE sweep.
+- **Dependency refresh.** `axios` 1.20.0, `ws` 8.22.0 and `follow-redirects` 1.16.1 are all at their latest published versions with zero audit findings; the lockfile picked up the one in-range transitive update.
+
+---
+
 ## v1.14.2
 
 ### Security
