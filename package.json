@@ -1,6 +1,6 @@
 {
   "name": "jellyfin-mpv-play",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Control MPV from Jellyfin's web interface. Play movies and series with hardware acceleration, auto-resume, and auto-play next episode.",
   "main": "shim.js",
   "scripts": {
