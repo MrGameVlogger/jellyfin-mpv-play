@@ -355,6 +355,8 @@ All state is module-level variables. No state machine or stores — just mutable
 | `volumeLevel` | number | Current volume (0-100) |
 | `mpvTrackList` | array | mpv `track-list` snapshot (ff-index ↔ per-type id mapping, refreshed on `file-loaded`) |
 | `streamIndexMap` | object | `{toMpv, toJf}` explicit Jellyfin Index ↔ mpv track id maps (rebuilt on `file-loaded` and after external adds) |
+| `fileLoadGeneration` | number | Bumped per `file-loaded` AND at navigation via `invalidateFileGeneration()` — stale async continuations (external stream adds, track-map rebuilds) bail when superseded |
+| `queueLoadGeneration` | number | Bumped per `loadNewQueue` — a superseded queue run must not send playlist commands |
 | `itemInfoCache` | Map | itemId → `{title, mediaStreams, mediaSourceId}` for the current queue (batch-fetched) |
 | `externalStreamsAdded` | Set | Sidecar stream URLs already added for the loaded file (cleared per file) |
 
@@ -536,7 +538,17 @@ mpv emits a phantom `pause=false` ("Playback resumed") **while exiting** — the
 - `isStoppingPlayback` set at quit-initiation (`shim-close`, `unwatched-quit`, `shutdown`, auto-close quits, mpv close handler) suppresses further progress reports
 - `isReportingStop` stays set until the next `reportPlaybackStart()`/`file-loaded` — never clear it when the stop POST lands
 - all playback reports serialize through `chainReport` (`reportChain`) so the server always processes progress before stop — and so a transition's `start(new)` can never overtake `stop(old)`
-- **manual transitions must report start explicitly**: any path that pre-updates `queuePosition`/`currentItemId` before sending `playlist-next`/`playlist-prev`/`playlist-play-index` (playNextEpisode queue-advance / in-season / NextUp, playPreviousEpisode queue path) bypasses the `playlist-pos` handler's transition block — its guard is `newPos !== queuePosition`, already false by the time the event lands. Those paths call `beginPlaybackReporting()`; without it the server hears STOP for the old item and only PROGRESS for the new one (scrobblers miss the start, `playSessionId` goes stale).
+- **manual transitions must report start explicitly**: any path that pre-updates `queuePosition`/`currentItemId` before sending `playlist-next`/`playlist-prev`/`playlist-play-index` (playNextEpisode queue-advance / in-season / NextUp, playPreviousEpisode queue path) bypasses the `playlist-pos` handler's transition block — its guard is `newPos !== queuePosition`, already false by the time the event lands. Those paths call `beginPlaybackReporting()`; without it the server hears STOP for the old item and only PROGRESS for the new one (scrobblers miss the start, `playSessionId` goes stale). The `playlist-pos` `.catch` must call it too — reporting must never depend on the info fetch succeeding.
+
+### Stale-async guards (generation tokens)
+
+Any async continuation that outlives the file or command it was started for must be generation-guarded, or it mutates state for the wrong item:
+
+- `fileLoadGeneration` (bumped on `file-loaded` AND at navigation via `invalidateFileGeneration()`) guards `loadExternalStreams` and the track-setup IIFE — without it a skip during the item-info fetch `sub-add`s the OLD item's external subs into the NEW file and rebuilds `streamIndexMap` from mismatched streams/tracks (wrong `aid`/`sid` thereafter). Check after **every** await, including inside the deferred post-add callback. Bumping at navigation time matters: the replacement stream takes seconds to load over HTTP, so a stale callback can fire long before the next `file-loaded` (verified live — a skip in the post-add window applied the old item's requested subtitle to the new file).
+- `queueLoadGeneration` (bumped per `loadNewQueue`) stops two rapid Play commands from interleaving playlist sends — the older run's `insert-at` chunks would land AFTER the newer run's `replace`.
+- `playbackGeneration` (bumped in `playMedia`) guards the same way for the spawn path.
+
+Pattern: `const gen = ++XGeneration;` at entry, `if (gen !== XGeneration) return;` after each await and before each side effect. Same class of bug: fire-and-forget writes whose order matters (unwatched-quit's DELETE vs the stop report's UserData write) must be sequenced on `chainReport`, not left to chance.
 
 ### Uncaught exceptions
 
