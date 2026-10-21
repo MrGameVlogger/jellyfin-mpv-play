@@ -364,7 +364,9 @@ All state is module-level variables. No state machine or stores — just mutable
 | `isPlayingNext` | boolean | Prevents double-triggering episode transitions (30s timeout fallback) |
 | `isPlayingNextTimestamp` | number | Timestamp when `isPlayingNext` was set (for timeout) |
 | `isNewQueueLoad` | boolean | True during `loadNewQueue()` to suppress file-loaded handlers |
-| `isReportingStop` | boolean | Prevents duplicate stop reports |
+| `isReportingStop` | boolean | Prevents duplicate stop reports; stays set until the next `reportPlaybackStart()`/`file-loaded` (clearing it when the stop lands lets a late progress report resurrect the session) |
+| `isStoppingPlayback` | boolean | Quit initiated/stop reported — suppresses progress reports until the next playback (mpv's phantom `pause=false` during exit must not outlive the stop report) |
+| `reportChain` | Promise | Serialized playback-report chain — progress/stop/start reach the server in call order (fire-and-forget over separate connections otherwise races) |
 | `isUnwatchedQuit` | boolean | Set by OSC `unwatched-quit`: suppress mark-watched and any resume save; item is reset to unwatched |
 | `isSettingSubtitleFromJellyfin` | boolean | Echo prevention: true when subtitle change came from Jellyfin (5s timeout) |
 | `pendingQueries` | Map | Tracks outstanding IPC queries (must resolve all before cleanup) |
@@ -526,6 +528,13 @@ Use patterns like:
 - `markedWatched` Set prevents duplicate "mark as watched" calls (cleared on each new file load)
 - `isReportingStop` flag prevents duplicate stop reports
 - `isSettingSubtitleFromJellyfin` flag with 5s timeout prevents subtitle echo
+
+### Stop report vs. progress report ordering
+
+mpv emits a phantom `pause=false` ("Playback resumed") **while exiting** — the pause observer turns every pause change into a `POST /Sessions/Playing/Progress`, which can land AFTER `POST /Sessions/Playing/Stopped` (fire-and-forget over separate connections). Jellyfin's progress handler then re-stamps the session as playing and the server "disagrees" that playback stopped — intermittent, purely request-ordering. Defenses (all three needed):
+- `isStoppingPlayback` set at quit-initiation (`shim-close`, `unwatched-quit`, `shutdown`, mpv close handler) suppresses further progress reports
+- `isReportingStop` stays set until the next `reportPlaybackStart()`/`file-loaded` — never clear it when the stop POST lands
+- all playback reports serialize through `chainReport` (`reportChain`) so the server always processes progress before stop — and so a transition's `start(new)` can never overtake `stop(old)`
 
 ### Uncaught exceptions
 
