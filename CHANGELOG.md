@@ -18,6 +18,15 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.14.1
+
+### Security
+- **Patched credential-header leak on cross-origin redirects** (follow-redirects 1.16.0 → 1.16.1, transitive via axios, which every Jellyfin API call uses). Two advisories, both fixed in 1.16.1:
+  - **GHSA-q3jh-wrc6-jgq8** (high) — array-form request headers bypassed cross-origin sensitive-header stripping, so a malicious or compromised redirect target could silently harvest the `Authorization: MediaBrowser Token=...` header the shim sends on every request.
+  - **GHSA-8r9p-f939-6h3c / CVE-2026-111755** — incomplete regex escaping let metacharacter-named headers silently bypass the `sensitiveHeaders` protection (the shim does not use that option; listed for completeness).
+
+---
+
 ## v1.14.0
 
 ### Features
