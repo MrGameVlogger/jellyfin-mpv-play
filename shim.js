@@ -437,6 +437,24 @@ let ipcCommandId = 1;
 let playSessionId = null;
 let currentPositionSeconds = 0;
 let isReportingStop = false;
+// Quit is initiated (or a stop reported): suppress progress reports until the
+// next playback starts. mpv emits a phantom pause=false ("Playback resumed")
+// while exiting, and the resulting POST /Sessions/Playing/Progress can land
+// AFTER POST /Sessions/Playing/Stopped (fire-and-forget over separate
+// connections) — Jellyfin then re-stamps the session as playing and the server
+// "disagrees" that playback stopped. Verified in a live session log.
+let isStoppingPlayback = false;
+// Serializes playback reports (progress/stop/start) so they reach the server in
+// CALL ORDER — they travel as fire-and-forget POSTs over separate connections,
+// which otherwise race: a progress report landing after the stop re-stamps the
+// session as playing (mpv emits a phantom pause=false while exiting), and a
+// start landing before the previous item's stop would kill the new playback.
+let reportChain = Promise.resolve();
+
+function chainReport(fn) {
+    reportChain = reportChain.catch(() => {}).then(fn);
+    return reportChain;
+}
 let accessToken = null;
 let userId = null;
 function createWsSocket(role) {
@@ -2014,6 +2032,14 @@ async function playMedia(itemId, startTicks) {
                 log('error', 'mpv', '   - Insufficient permissions');
             }
             
+            // mpv emits a phantom pause=false ("Playback resumed") while exiting —
+            // suppress progress reports before anything else so none can race the
+            // stop report below (the ordering fix in reportPlaybackStop covers the
+            // one already in flight).
+            isStoppingPlayback = true;
+            stopProgressPoll();
+            if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+
             if (currentItemId && isUnwatchedQuit) {
                 // "Quit and Mark Unwatched": leave no resume position anywhere —
                 // no local save, no server resume point (stop report at 0), and
@@ -2043,10 +2069,8 @@ async function playMedia(itemId, startTicks) {
             }
             isUnwatchedQuit = false;
             mpvProcess = null;
-            stopProgressPoll();
             for (const [, q] of pendingQueries) { if (q.timer) clearTimeout(q.timer); q.resolve(null); }
             pendingQueries.clear();
-            if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
             if (ipcClient) { ipcClient.removeAllListeners(); ipcClient.destroy(); ipcClient = null; }
             currentItemId = null;
             isSettingSubtitleFromJellyfin = false;
@@ -2057,7 +2081,9 @@ async function playMedia(itemId, startTicks) {
             streamIndexMap = { toMpv: new Map(), toJf: new Map() };
             externalStreamsAdded.clear();
             currentEpisodeInfo = null;
-            isReportingStop = false;
+            // isReportingStop / isStoppingPlayback stay set on purpose: the next
+            // reportPlaybackStart() lifts them. Clearing here let a late progress
+            // report resurrect the session after a successful stop.
             isPlayingNext = false;
             isNewQueueLoad = false;
         });
@@ -2419,7 +2445,11 @@ function handleMpvEvent(event) {
             isNewQueueLoad = false;
         }
 
+        // A loaded file is a new playback: lift the stopped state even if the
+        // transition's reportPlaybackStart is still pending (or never ran — its
+        // info fetch can fail).
         isReportingStop = false;
+        isStoppingPlayback = false;
         log('info', 'mpv', '✅ File loaded by MPV. Preparing Seek if necessary...');
         isPlayingNext = false;
         currentDuration = 0;
@@ -2652,6 +2682,9 @@ function handleMpvEvent(event) {
             handleOscAction(event.args[1], event.args[2]);
         } else if (event.args[0] === 'shim-close') {
             log('info', 'osc', '🎮 OSC close requested — closing MPV');
+            // Quit is initiated: mpv emits a phantom pause=false while exiting —
+            // it must not fire a progress report that could outlive the stop.
+            isStoppingPlayback = true;
             sendMpvCommand('quit');
         } else if (event.args[0] === 'shim-jf-osc-ui-seek') {
             // OSC seekbar was dragged — exempt from skip-intro detection
@@ -2929,6 +2962,11 @@ async function playPreviousEpisode() {
 }
 
 function reportPlaybackStart(itemId, positionTicks) {
+    // A new playback re-enables progress reporting — this is the ONLY place
+    // "stopped" state is lifted, so a late progress POST can never resurrect
+    // the session after the stop report.
+    isStoppingPlayback = false;
+    isReportingStop = false;
     const headers = getAuthHeaders();
     
     const data = {
@@ -2953,7 +2991,7 @@ function reportPlaybackStart(itemId, positionTicks) {
 
     log('info', 'report', '📡 Reporting playback start...');
     
-    axios.post(`${CONFIG.serverUrl}/Sessions/Playing`, data, { headers, timeout: 10000 })
+    return chainReport(() => axios.post(`${CONFIG.serverUrl}/Sessions/Playing`, data, { headers, timeout: 10000 })
         .then(() => {
             log('info', 'report', '✅ Playback start reported');
         })
@@ -2961,7 +2999,8 @@ function reportPlaybackStart(itemId, positionTicks) {
             const status = e.response?.status || 'unknown';
             const body = e.response?.data ? JSON.stringify(e.response.data) : e.message;
             log('error', 'report', `⚠️ Error reporting start (${status}):`, body);
-        });
+        })
+    );
 }
 
 function startProgressReporting(itemId) {
@@ -2986,6 +3025,7 @@ function startProgressReporting(itemId) {
 }
 
 function reportPlaybackProgress(itemId, positionTicks) {
+    if (isStoppingPlayback) return; // never let a progress report resurrect a stopped session
     const headers = getAuthHeaders();
     
     const data = {
@@ -3008,18 +3048,22 @@ function reportPlaybackProgress(itemId, positionTicks) {
             : (currentSubtitleTrack === false || currentSubtitleTrack === 'no' ? -1 : undefined)
     };
 
-    axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Progress`, data, { headers, timeout: 10000 })
-        .catch(e => {
-            log('error', 'report', '⚠️ Failed to report progress:', e.message);
-        });
+    // Serialized on the shared chain so reports reach the server in call order.
+    return chainReport(() =>
+        axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Progress`, data, { headers, timeout: 10000 })
+            .catch(e => {
+                log('error', 'report', '⚠️ Failed to report progress:', e.message);
+            })
+    );
 }
 
 function reportPlaybackStop(itemId, positionTicks) {
     if (!itemId || isReportingStop) {
-        return;
+        return Promise.resolve();
     }
     
     isReportingStop = true;
+    isStoppingPlayback = true;
     
     const headers = getAuthHeaders();
     
@@ -3032,15 +3076,21 @@ function reportPlaybackStop(itemId, positionTicks) {
 
     log('info', 'report', `📡 Reporting playback stop (position: ${(positionTicks / 10000000).toFixed(2)}s)...`);
     
-    axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Stopped`, data, { headers, timeout: 10000 })
-        .then(() => {
-            log('info', 'report', '✅ Playback stop reported correctly');
-            isReportingStop = false;
-        })
-        .catch(e => {
-            log('error', 'report', '⚠️ Error reporting stop:', e.message);
-            isReportingStop = false;
-        });
+    // Serialized on the shared chain: the phantom-resume progress POST is
+    // enqueued before the close handler's stop, so it lands first — and any
+    // report enqueued later (there must be none until the next start) would
+    // land after. isReportingStop stays set until reportPlaybackStart() — it
+    // must NOT be cleared here or a late progress report would resurrect the
+    // session.
+    return chainReport(() =>
+        axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Stopped`, data, { headers, timeout: 10000 })
+            .then(() => {
+                log('info', 'report', '✅ Playback stop reported correctly');
+            })
+            .catch(e => {
+                log('error', 'report', '⚠️ Error reporting stop:', e.message);
+            })
+    );
 }
 
 // jf-mpv-osc integration
@@ -3119,6 +3169,7 @@ function handleOscAction(verb, arg) {
         case 'unwatched-quit':
             log('info', 'osc', '🎮 OSC unwatched quit — closing MPV');
             isUnwatchedQuit = true;
+            isStoppingPlayback = true;
             sendMpvCommand('quit');
             break;
         case 'syncplay-refresh':
@@ -3415,18 +3466,8 @@ function shutdown(signal) {
     };
 
     if (currentItemId && !isReportingStop) {
-        isReportingStop = true;
-        const headers = getAuthHeaders();
-        const data = {
-            ItemId: currentItemId,
-            PositionTicks: isUnwatchedQuit ? 0 : Math.round(currentPositionSeconds * 10000000),
-            IsPaused: isMpvPaused,
-            PlayMethod: 'DirectPlay',
-            PlaySessionId: playSessionId
-        };
         const stopTimeout = setTimeout(doExit, 3000);
-        axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Stopped`, data, { headers, timeout: 10000 })
-            .catch(() => {})
+        reportPlaybackStop(currentItemId, isUnwatchedQuit ? 0 : Math.round(currentPositionSeconds * 10000000))
             .finally(() => { clearTimeout(stopTimeout); doExit(); });
     } else {
         doExit();

@@ -233,6 +233,26 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
     shim.includes('function buildStreamIndexMap'),
     'explicit Jellyfin<->mpv stream index map must exist'
   );
+
+  // mpv emits a phantom pause=false while exiting; the resulting progress POST
+  // can land AFTER the stop POST and Jellyfin then re-marks the session as
+  // playing. Progress must be suppressed once stopping, the stopped state must
+  // persist until the next playback starts, and the stop must chain behind any
+  // in-flight progress POST. Verified in a live session: the server kept showing
+  // the movie as playing after a clean quit.
+  assert(
+    /function reportPlaybackProgress[\s\S]{0,200}isStoppingPlayback/.test(shim),
+    'reportPlaybackProgress must be suppressed while stopping'
+  );
+  assert(
+    shim.includes('function chainReport') && shim.split('function chainReport').length - 1 === 1
+      && (shim.match(/chainReport\(/g) || []).length >= 3,
+    'playback reports must be serialized through the shared chain'
+  );
+  assert(
+    !/Playback stop reported correctly';\s*\n\s*isReportingStop = false;/.test(shim),
+    'isReportingStop must NOT be cleared when the stop report lands (it resurrects the session)'
+  );
 });
 
 test('fetchEpisodeInfo returns the full payload for every item type', () => {
