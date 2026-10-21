@@ -358,14 +358,30 @@ function externalStreamUrl(stream, itemId = currentItemId) {
 // rather than a bare URL. Selection is never forced here ("auto"): the Play
 // request's track choice is applied afterwards by applyRequestedStreamSelection.
 const externalStreamsAdded = new Set(); // per file load; cleared in handleMpvEvent
+// Bumped on every file-loaded AND at every navigation. Async continuations
+// started for an earlier file (item-info fetch before sub-add, the post-add map
+// rebuild) must check it — without that, skipping during the fetch adds the OLD
+// item's sidecar subs to the NEW file and rebuilds the index map from mismatched
+// streams/tracks. Bumping at navigation matters because the replacement stream
+// takes seconds to load: the stale callback can fire long before the next
+// file-loaded (caught live: a skip during the post-add window applied the old
+// item's requested subtitle to the new file).
+let fileLoadGeneration = 0;
 
-async function loadExternalStreams(itemId) {
+// In-flight continuations for the current file are obsolete the moment we start
+// navigating away — call this from every path that sends a navigation command.
+function invalidateFileGeneration() {
+    fileLoadGeneration++;
+}
+
+async function loadExternalStreams(itemId, generation) {
     if (!ipcClient || ipcClient.destroyed) return;
     let info = itemInfoCache.get(itemId);
     if (!info || !info.mediaStreams) {
         await fetchItemInfoBatch([itemId]);
         info = itemInfoCache.get(itemId);
     }
+    if (generation !== fileLoadGeneration) return; // superseded by a newer file
     const externals = (info && info.mediaStreams || [])
         .filter(s => s.IsExternal && (s.Type === 'Subtitle' || s.Type === 'Audio'));
     if (!externals.length) return;
@@ -392,8 +408,10 @@ async function loadExternalStreams(itemId) {
     // the selection the server asked for (it may be one of these externals).
     setTimeout(async () => {
         if (!ipcClient || ipcClient.destroyed) return;
+        if (generation !== fileLoadGeneration) return; // superseded by a newer file
         const tl = await queryProperty('track-list').catch(() => null);
         if (!Array.isArray(tl)) return;
+        if (generation !== fileLoadGeneration) return; // superseded during the await
         mpvTrackList = tl;
         refreshStreamIndexMap(itemId);
         applyRequestedStreamSelection(itemId);
@@ -615,6 +633,9 @@ function normalizeSubColor(raw) {
     return '#FFFFFF';
 }
 let playbackGeneration = 0;
+// Supersession token for loadNewQueue: bumped per call so a slow info fetch in
+// an older run cannot interleave playlist sends with a newer one.
+let queueLoadGeneration = 0;
 let isMpvPaused = false;
 let isMuted = false;
 let volumeLevel = 100;
@@ -1789,6 +1810,12 @@ function showErrorOsd(text) {
 }
 
 async function loadNewQueue(itemId, startTicks) {
+    // Supersession token: two Play commands inside the info-fetch window would
+    // otherwise interleave their playlist sends (the older run's insert-at
+    // chunks can land AFTER the newer run's replace). Same pattern as
+    // playbackGeneration in playMedia.
+    const qgen = ++queueLoadGeneration;
+    invalidateFileGeneration(); // stale file continuations die with this navigation
     stopProgressPoll();
     if (currentItemId && !isReportingStop) {
         const runtime = currentEpisodeInfo?.itemRuntime || 0;
@@ -1815,6 +1842,7 @@ async function loadNewQueue(itemId, startTicks) {
         isNewQueueLoad = false;
         return;
     }
+    if (qgen !== queueLoadGeneration) return; // superseded by a newer Play
 
     if (!currentEpisodeInfo) {
         log('error', 'queue', `⚠️ Could not load item info for ${itemId} — aborting playback (server error, item not "non-playable")`);
@@ -1870,6 +1898,7 @@ async function loadNewQueue(itemId, startTicks) {
         queuePosition = itemIndex >= 0 ? itemIndex : Math.min(Math.max(queuePosition, 0), playQueue.length - 1);
     }
     await fetchItemInfoBatch(playQueue);
+    if (qgen !== queueLoadGeneration) return; // superseded during the fetch
     sendMpvCommand('loadfile', [buildQueueM3u([playQueue[queuePosition]]), 'replace']);
     const before = playQueue.slice(0, queuePosition);
     const after = playQueue.slice(queuePosition + 1);
@@ -1904,6 +1933,7 @@ async function loadNewQueue(itemId, startTicks) {
 }
 
 async function playMedia(itemId, startTicks) {
+    invalidateFileGeneration(); // stale file continuations die with this navigation
     if (currentItemId && !isReportingStop) {
         reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
     }
@@ -2044,10 +2074,16 @@ async function playMedia(itemId, startTicks) {
                 // "Quit and Mark Unwatched": leave no resume position anywhere —
                 // no local save, no server resume point (stop report at 0), and
                 // the item is reset to unwatched in Jellyfin.
-                markItemAsUnwatched(currentItemId);
+                //
+                // The DELETE must land AFTER the stop report: Jellyfin's stop
+                // handler writes UserData, so a fire-and-forget delete racing
+                // ahead of it leaves the user data recreated. Enqueue it on the
+                // shared report chain so it is the last write.
+                const unwatchedId = currentItemId;
                 if (!isReportingStop) {
-                    reportPlaybackStop(currentItemId, 0);
+                    reportPlaybackStop(unwatchedId, 0);
                 }
+                chainReport(() => markItemAsUnwatched(unwatchedId));
             } else {
                 if (currentItemId && currentPositionSeconds > 0) {
                     const positionTicks = Math.round(currentPositionSeconds * 10000000);
@@ -2302,6 +2338,7 @@ async function markItemAsWatched(itemId) {
 }
 
 function killMpv() {
+    invalidateFileGeneration(); // the file this generation served is going away
     stopProgressPoll();
     introSegments = [];
     skippedSegmentIds = new Set();
@@ -2458,6 +2495,7 @@ function handleMpvEvent(event) {
         skippedSegmentIds.clear();
         isInIntroSegment = false;
         externalStreamsAdded.clear();
+        const fileGen = ++fileLoadGeneration;
 
         // Refresh the track map, add external (sidecar) streams the container
         // does not carry, and rebuild the Jellyfin<->mpv index map. The item id
@@ -2468,6 +2506,7 @@ function handleMpvEvent(event) {
             const entry = typeof pos === 'number' ? await queryProperty(`playlist/${pos}/filename`).catch(() => null) : null;
             const itemId = itemIdFromPlaylistEntry(entry) || currentItemId;
             const tl = await queryProperty('track-list').catch(() => null);
+            if (fileGen !== fileLoadGeneration) return; // a newer file won the race
             if (Array.isArray(tl)) mpvTrackList = tl;
             if (itemId) {
                 refreshStreamIndexMap(itemId);
@@ -2477,7 +2516,7 @@ function handleMpvEvent(event) {
                 // re-apply the requested selection now, and again after the
                 // external adds in case it targets one of those.
                 applyRequestedStreamSelection(itemId);
-                await loadExternalStreams(itemId);
+                await loadExternalStreams(itemId, fileGen);
             } else {
                 refreshStreamIndexMap();
             }
@@ -2636,9 +2675,7 @@ function handleMpvEvent(event) {
                     log('info', 'queue', `▶️ Starting next episode: ${titleText}`);
                     sendMpvCommand('set_property', ['force-media-title', `Jellyfin - ${titleText}`]);
                     sendMpvCommand('set_property', ['title', `Jellyfin - ${titleText}`]);
-                    playSessionId = crypto.randomUUID();
-                    reportPlaybackStart(currentItemId, 0);
-                    startProgressReporting(currentItemId);
+                    beginPlaybackReporting(currentItemId);
                     getIntroSegments(currentItemId).catch(err => {
                         log('error', 'segments', '⚠️ Error getting intro segments:', err.message);
                     });
@@ -2646,6 +2683,10 @@ function handleMpvEvent(event) {
                     pushOscState();
                 }).catch(err => {
                     log('error', 'episode', '⚠️ Error getting episode info:', err.message);
+                    // The report must not depend on the info fetch — without it
+                    // the server hears STOP for the old item and only PROGRESS
+                    // for the new one (no PlaybackStart for scrobblers).
+                    beginPlaybackReporting(currentItemId);
                     startProgressPoll();
                 });
             });
@@ -2701,6 +2742,7 @@ async function playNextEpisode() {
     }
     isPlayingNext = true;
     isPlayingNextTimestamp = Date.now();
+    invalidateFileGeneration(); // stale file continuations die with this navigation
     // Safety timeout to reset isPlayingNext if progress poll isn't running
     setTimeout(() => {
         if (isPlayingNext && Date.now() - isPlayingNextTimestamp > 30000) {
@@ -2911,6 +2953,7 @@ async function playPreviousEpisode() {
     }
 
     if (playQueue.length > 0 && queuePosition > 0) {
+        invalidateFileGeneration(); // stale file continuations die with this navigation
         const prevItemId = currentItemId;
         const prevPos = currentPositionSeconds;
         const prevRuntime = currentEpisodeInfo?.itemRuntime || 0;
@@ -3459,9 +3502,8 @@ function shutdown(signal) {
     }
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
     
-    if (currentItemId && isUnwatchedQuit) {
-        markItemAsUnwatched(currentItemId);
-    } else if (currentItemId && currentPositionSeconds > 0) {
+    const doUnwatched = !!(currentItemId && isUnwatchedQuit);
+    if (!doUnwatched && currentItemId && currentPositionSeconds > 0) {
         savePlaybackPosition(currentItemId, Math.round(currentPositionSeconds * 10000000));
     }
 
@@ -3490,12 +3532,26 @@ function shutdown(signal) {
         }
     };
 
+    // Unwatched-quit: the DELETE must land AFTER the stop report (Jellyfin's
+    // stop handler writes UserData — a racing delete gets undone). It is
+    // enqueued on the shared report chain so it is the last server write.
+    let finishCalled = false;
+    const finish = () => {
+        if (finishCalled) return;
+        finishCalled = true;
+        if (doUnwatched) {
+            chainReport(() => markItemAsUnwatched(currentItemId)).finally(doExit);
+        } else {
+            doExit();
+        }
+    };
+
     if (currentItemId && !isReportingStop) {
-        const stopTimeout = setTimeout(doExit, 3000);
+        const stopTimeout = setTimeout(finish, 3000);
         reportPlaybackStop(currentItemId, isUnwatchedQuit ? 0 : Math.round(currentPositionSeconds * 10000000))
-            .finally(() => { clearTimeout(stopTimeout); doExit(); });
+            .finally(() => { clearTimeout(stopTimeout); finish(); });
     } else {
-        doExit();
+        finish();
     }
 }
 

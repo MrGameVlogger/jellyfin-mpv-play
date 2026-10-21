@@ -265,6 +265,29 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
     shim.includes('function beginPlaybackReporting') && beginCount >= 4,
     'every manual transition (queue next/prev, in-season advance, NextUp) must call beginPlaybackReporting'
   );
+
+  // Async continuations that outlive the file/play they were started for must
+  // be generation-guarded: without it, a skip during an item-info fetch adds
+  // the OLD item's external subs to the NEW file and rebuilds the index map
+  // from mismatched streams/tracks (and two rapid Plays interleave playlist
+  // sends). Verified live: fast-skip corrupted the new file's track list.
+  assert(
+    /fileLoadGeneration/.test(shim) && /loadExternalStreams\(itemId, fileGen\)/.test(shim)
+      && shim.split('invalidateFileGeneration()').length - 1 >= 5,
+    'external stream loading must be generation-guarded AND invalidated at navigation time'
+  );
+  assert(
+    /queueLoadGeneration/.test(shim) && /qgen !== queueLoadGeneration/.test(shim),
+    'loadNewQueue must be superseded by a newer Play (generation check)'
+  );
+
+  // "Quit and Mark Unwatched" must DELETE user data AFTER the stop report —
+  // Jellyfin's stop handler writes UserData, so a racing fire-and-forget delete
+  // gets undone and the item is left with progress again.
+  assert(
+    /chainReport\(\(\) => markItemAsUnwatched/.test(shim),
+    'unwatched-quit delete must be chained after the stop report'
+  );
 });
 
 test('fetchEpisodeInfo returns the full payload for every item type', () => {
