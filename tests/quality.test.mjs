@@ -209,6 +209,30 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
     shim.includes('function jellyfinStreamIndexToMpvId') && shim.includes('function mpvTrackIdToJellyfinIndex'),
     'stream index <-> mpv track id mapping helpers must exist'
   );
+
+  // Verified on mpv 0.41: playlist/N/title is read-only and loadfile's per-file
+  // force-media-title only lands after an entry opens. In-memory M3U entries via
+  // loadlist are the only way to show names instead of raw stream URLs (which
+  // carry the ApiKey token) in the stock OSC playlist.
+  assert(
+    shim.includes('function buildQueueM3u') && shim.includes("sendMpvCommand('loadlist'"),
+    'queue loads must go through titled M3U playlists (loadlist) for the stock OSC'
+  );
+
+  // External (sidecar) streams are not in the static container stream — without
+  // sub-add/audio-add a movie whose subs are all external has no subtitle tracks
+  // in mpv at all.
+  assert(
+    shim.includes("sendMpvCommand('sub-add'") && shim.includes("sendMpvCommand('audio-add'"),
+    'external streams must be added to mpv via sub-add/audio-add'
+  );
+
+  // Jellyfin Index is not the container ff-index when external streams exist
+  // (externals are numbered first) — mapping must be explicit, not ff-index only.
+  assert(
+    shim.includes('function buildStreamIndexMap'),
+    'explicit Jellyfin<->mpv stream index map must exist'
+  );
 });
 
 test('fetchEpisodeInfo returns the full payload for every item type', () => {

@@ -131,18 +131,69 @@ function redact(value) {
         .replace(/(X-Emby-Token[":=\s]+)[^",\s]+/gi, '$1***');
 }
 
-// Jellyfin stream indices (MediaStream.Index) are global container stream indices —
-// the same numbering as mpv's track-list "ff-index". mpv's aid/sid properties however
-// take per-type track IDs (1-based within video/audio/sub). Passing a Jellyfin index
-// straight to aid/sid selects the wrong track or nothing at all (sid becomes false).
-// These two helpers translate between the two ID spaces. They prefer mpv's own
-// track-list (authoritative, populated on file-loaded) and fall back to the ordering
-// of Jellyfin's MediaStreams (mpv IDs are 1-based ordinals within each type) for the
-// window before the file has finished loading.
+// Jellyfin stream indices (MediaStream.Index) and mpv track ids live in different
+// numbering spaces. mpv's aid/sid take per-type track IDs (1-based ordinals within
+// video/audio/sub in track-list order); Jellyfin's Index is the stream's position in
+// the source's stream list — and when external (sidecar) streams exist, Jellyfin
+// numbers those FIRST, so Index is not the container ff-index either (verified on a
+// live library item: container V0/A1 while Jellyfin reports external subs at 0/1
+// and V2/A3). These helpers translate between the two spaces via an explicit map
+// built from Jellyfin's MediaStreams and mpv's track-list: embedded streams zip by
+// order within type (both sides follow container order), external streams match by
+// the exact URL they were added with (mpv's external-filename). The window before
+// the file has finished loading falls back to the old ff-index/ordinal heuristics.
 const MPV_TYPE_OF = { Audio: 'audio', Subtitle: 'sub', Video: 'video' };
+
+let streamIndexMap = { toMpv: new Map(), toJf: new Map() };
+
+function streamMapKey(type, id) {
+    return `${type}:${id}`;
+}
+
+function buildStreamIndexMap(mediaStreams, mpvTracks, itemId = currentItemId) {
+    const toMpv = new Map();
+    const toJf = new Map();
+    for (const type of ['Audio', 'Subtitle']) {
+        const mpvType = MPV_TYPE_OF[type] || type;
+        const jfSame = (mediaStreams || []).filter(s => s.Type === type);
+        const mpvSame = (mpvTracks || []).filter(t => t.type === mpvType);
+        const jfEmb = jfSame.filter(s => !s.IsExternal);
+        const jfExt = jfSame.filter(s => s.IsExternal);
+        const mpvEmb = mpvSame.filter(t => !t.external);
+        const mpvExt = mpvSame.filter(t => t.external);
+        // Embedded: both sides list tracks in container order — zip positionally.
+        for (let i = 0; i < Math.min(jfEmb.length, mpvEmb.length); i++) {
+            toMpv.set(streamMapKey(type, jfEmb[i].Index), mpvEmb[i].id);
+            toJf.set(streamMapKey(type, mpvEmb[i].id), jfEmb[i].Index);
+        }
+        // External: match by the URL they were added with (exact identity), else
+        // fall back to add order (we add them in MediaStreams order).
+        const unmatched = [...mpvExt];
+        for (const s of jfExt) {
+            const url = externalStreamUrl(s, itemId);
+            let t = url ? unmatched.find(x => x['external-filename'] === url) : undefined;
+            if (t) unmatched.splice(unmatched.indexOf(t), 1);
+            else t = unmatched.shift();
+            if (t) {
+                toMpv.set(streamMapKey(type, s.Index), t.id);
+                toJf.set(streamMapKey(type, t.id), s.Index);
+            }
+        }
+    }
+    streamIndexMap = { toMpv, toJf };
+}
+
+function refreshStreamIndexMap(itemId) {
+    const streams = (itemId && itemInfoCache.has(itemId))
+        ? (itemInfoCache.get(itemId).mediaStreams || [])
+        : (currentEpisodeInfo && currentEpisodeInfo.mediaStreams);
+    buildStreamIndexMap(streams, mpvTrackList);
+}
 
 function jellyfinStreamIndexToMpvId(streamIndex, type) {
     if (typeof streamIndex !== 'number') return streamIndex;
+    const mapped = streamIndexMap.toMpv.get(streamMapKey(type, streamIndex));
+    if (mapped !== undefined) return mapped;
     const mpvType = MPV_TYPE_OF[type] || type;
     const byList = mpvTrackList.find(t => t.type === mpvType && t['ff-index'] === streamIndex);
     if (byList) return byList.id;
@@ -158,6 +209,8 @@ function jellyfinStreamIndexToMpvId(streamIndex, type) {
 
 function mpvTrackIdToJellyfinIndex(mpvId, type) {
     if (typeof mpvId !== 'number') return undefined;
+    const mapped = streamIndexMap.toJf.get(streamMapKey(type, mpvId));
+    if (mapped !== undefined) return mapped;
     const mpvType = MPV_TYPE_OF[type] || type;
     const byList = mpvTrackList.find(t => t.type === mpvType && t.id === mpvId);
     if (byList && typeof byList['ff-index'] === 'number') return byList['ff-index'];
@@ -189,6 +242,187 @@ async function resyncQueueFromPlaylist() {
     }
     playQueue = ids;
     pushOscState();
+}
+
+// ---------------------------------------------------------------------------
+// Item info cache (titles + media streams for every queued item) and queue
+// construction. Playlist entries are loaded through in-memory M3U playlists
+// because that is the ONLY way mpv will show a name instead of the raw stream
+// URL in its own OSC playlist view — a URL that also carries the ApiKey token.
+// (Verified on mpv 0.41: playlist/N/title is read-only, and per-file
+// force-media-title via loadfile's options argument only lands after the entry
+// has been opened. #EXTINF titles via loadlist populate titles immediately and
+// survive replace/insert-at/append alike — loadfile on an M3U URL does NOT
+// preserve them for insert-at/append.)
+const itemInfoCache = new Map(); // itemId -> { title, mediaStreams, mediaSourceId }
+
+function queueItemUrl(id) {
+    return `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${accessToken}`;
+}
+
+function buildItemTitle(item) {
+    if (item.Type === 'Episode') {
+        return [item.SeriesName, `${item.ParentIndexNumber}x${item.IndexNumber}`, item.Name]
+            .filter(Boolean).join(' - ');
+    }
+    return item.Name || 'Movie/Music';
+}
+
+function cacheItemInfo(item) {
+    if (!item || !item.Id) return;
+    const prev = itemInfoCache.get(item.Id) || {};
+    itemInfoCache.set(item.Id, {
+        title: buildItemTitle(item),
+        // Only trust MediaStreams/MediaSources when the caller actually fetched
+        // them (season episode lists don't) — a cached empty array would block
+        // the fetch that loads external streams.
+        mediaStreams: item.MediaStreams !== undefined ? (item.MediaStreams || []) : prev.mediaStreams,
+        mediaSourceId: (item.MediaSources && item.MediaSources[0] && item.MediaSources[0].Id) || prev.mediaSourceId || item.Id
+    });
+}
+
+// One batch request fills titles + streams for a whole queue (Ids= is a
+// comma-separated filter on /Users/{userId}/Items).
+async function fetchItemInfoBatch(ids) {
+    const missing = [...new Set(ids)].filter(id => {
+        if (!id) return false;
+        const cached = itemInfoCache.get(id);
+        return !cached || !cached.mediaStreams; // title-only entries still need streams
+    });
+    if (!missing.length) return;
+    try {
+        const response = await axios.get(`${CONFIG.serverUrl}/Users/${userId}/Items`, {
+            headers: getAuthHeaders(),
+            params: {
+                Ids: missing.join(','),
+                Fields: 'MediaStreams,MediaSources,SeriesName,IndexNumber,ParentIndexNumber'
+            }
+        });
+        for (const item of (response.data.Items || [])) cacheItemInfo(item);
+    } catch (error) {
+        log('warn', 'queue', `⚠️ Could not fetch item titles (${missing.length} items): ${error.message}`);
+    }
+}
+
+function itemTitle(itemId) {
+    return (itemInfoCache.get(itemId) || {}).title || String(itemId);
+}
+
+function buildQueueM3u(ids) {
+    let m3u = '#EXTM3U';
+    for (const id of ids) {
+        // Title format matches force-media-title so the window/OSD title is
+        // correct the instant an entry starts, with no network round trip.
+        const title = `Jellyfin - ${itemTitle(id)}`.replace(/[\r\n]+/g, ' ');
+        m3u += `\n#EXTINF:-1,${title}`;
+        m3u += `\n${queueItemUrl(id)}`;
+    }
+    return `memory://${m3u}`;
+}
+
+// Delivery URL for an external (sidecar) stream — these are separate files the
+// static container stream does not carry, so mpv only sees them if we add them
+// ourselves (sub-add/audio-add). Format mirrors jellyfin-web's getSubtitleUrl:
+// /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}
+const SUB_FORMAT_OF = { subrip: 'srt', srt: 'srt', ass: 'ass', ssa: 'ssa', webvtt: 'vtt', vtt: 'vtt', mov_text: 'srt' };
+
+function externalStreamUrl(stream, itemId = currentItemId) {
+    const info = itemInfoCache.get(itemId) || {};
+    const mediaSourceId = info.mediaSourceId || itemId;
+    if (!mediaSourceId) return null;
+    const token = `ApiKey=${accessToken}`;
+    if (stream.Type === 'Subtitle') {
+        if (!stream.IsTextSubtitleStream) {
+            // The conversion endpoint only outputs text formats (verified: srt/
+            // ass/vtt 200, sup/pgs 400). Bitmap sidecars have no delivery path.
+            log('info', 'mpv', `ℹ️ Skipping external bitmap subtitle ${stream.Index} (${stream.Codec}) — no text conversion available`);
+            return null;
+        }
+        const format = SUB_FORMAT_OF[String(stream.Codec || '').toLowerCase()] || 'srt';
+        return `${CONFIG.serverUrl}/Videos/${itemId}/${mediaSourceId}/Subtitles/${stream.Index}/Stream.${format}?${token}`;
+    }
+    if (stream.Type === 'Audio') {
+        // Audio is selected via the audioStreamIndex query parameter on the
+        // /Audio/{itemId}/stream route (verified live — the path-segment form
+        // /Videos/{id}/{ms}/Audio/{index}/stream does not exist).
+        return `${CONFIG.serverUrl}/Audio/${itemId}/stream?audioStreamIndex=${stream.Index}&mediaSourceId=${mediaSourceId}&${token}`;
+    }
+    return null;
+}
+
+// Add external (sidecar) subtitle/audio streams to the file mpv just loaded.
+// The static container stream does not carry them, so without this a movie with
+// only external subs has NO subtitle tracks in mpv at all (the stock OSC menu
+// comes straight from mpv's track-list). Tracks are added with their Jellyfin
+// display name and language so the stock OSC shows "English (Full) (External)"
+// rather than a bare URL. Selection is never forced here ("auto"): the Play
+// request's track choice is applied afterwards by applyRequestedStreamSelection.
+const externalStreamsAdded = new Set(); // per file load; cleared in handleMpvEvent
+
+async function loadExternalStreams(itemId) {
+    if (!ipcClient || ipcClient.destroyed) return;
+    let info = itemInfoCache.get(itemId);
+    if (!info || !info.mediaStreams) {
+        await fetchItemInfoBatch([itemId]);
+        info = itemInfoCache.get(itemId);
+    }
+    const externals = (info && info.mediaStreams || [])
+        .filter(s => s.IsExternal && (s.Type === 'Subtitle' || s.Type === 'Audio'));
+    if (!externals.length) return;
+
+    let added = 0;
+    for (const s of externals) {
+        const url = externalStreamUrl(s, itemId);
+        if (!url || externalStreamsAdded.has(url)) continue;
+        externalStreamsAdded.add(url);
+        added++;
+        const title = s.DisplayTitle || s.Title || s.Language || `Track ${s.Index}`;
+        const lang = s.Language || 'und';
+        if (s.Type === 'Subtitle') {
+            sendMpvCommand('sub-add', [url, 'auto', title, lang]);
+        } else {
+            sendMpvCommand('audio-add', [url, 'auto', title, lang]);
+        }
+    }
+    if (!added) return;
+    log('info', 'mpv', `➕ Added ${added} external stream(s) to MPV`);
+
+    // sub-add is async inside mpv — give it a moment, then rebuild the index
+    // map so Jellyfin<->mpv track ids resolve for the new tracks too, and honor
+    // the selection the server asked for (it may be one of these externals).
+    setTimeout(async () => {
+        if (!ipcClient || ipcClient.destroyed) return;
+        const tl = await queryProperty('track-list').catch(() => null);
+        if (!Array.isArray(tl)) return;
+        mpvTrackList = tl;
+        refreshStreamIndexMap(itemId);
+        applyRequestedStreamSelection(itemId);
+        pushOscState();
+    }, 400);
+}
+
+// Re-apply the track selection the server requested, but only for the item the
+// request was issued for — auto-advance to another file must not drag a stale
+// request across, and mpv already keeps the user's choice between entries.
+// Safe to call repeatedly: setting aid/sid to the value they already have is a
+// no-op.
+function applyRequestedStreamSelection(itemId = currentItemId) {
+    if (requestedTrackItemId !== itemId) return;
+    if (requestedAudioStreamIndex !== undefined) {
+        const aid = requestedAudioStreamIndex === -1
+            ? 'no'
+            : jellyfinStreamIndexToMpvId(requestedAudioStreamIndex, 'Audio');
+        sendMpvCommand('set_property', ['aid', aid]);
+    }
+    if (requestedSubtitleStreamIndex !== undefined) {
+        isSettingSubtitleFromJellyfin = true;
+        if (subtitleFlagTimeout) clearTimeout(subtitleFlagTimeout);
+        subtitleFlagTimeout = setTimeout(() => { isSettingSubtitleFromJellyfin = false; subtitleFlagTimeout = null; }, 5000);
+        const sid = requestedSubtitleStreamIndex === 'no' || requestedSubtitleStreamIndex === -1
+            ? 'no'
+            : jellyfinStreamIndexToMpvId(requestedSubtitleStreamIndex, 'Subtitle');
+        sendMpvCommand('set_property', ['sid', sid]);
+    }
 }
 
 const TOKEN_FILE = path.join(__dirname, 'data', `jellyfin_token_${CONFIG.deviceId}.json`);
@@ -294,6 +528,14 @@ let pendingStreamUrl = null;
 let pendingStartSeconds = 0;
 let pendingAudioStreamIndex = undefined;
 let pendingSubtitleStreamIndex = undefined;
+// Sticky "the server asked for this track" selections. Unlike pending*, these
+// survive until the next Play/SetXStreamIndex so they can be re-applied once
+// external streams (which only exist after we sub-add them) are available.
+let requestedAudioStreamIndex = undefined;
+let requestedSubtitleStreamIndex = undefined;
+// The item the request was issued for. Auto-advance to another file must not
+// re-apply it (mpv keeps the user's track choice across playlist entries).
+let requestedTrackItemId = null;
 let isSettingSubtitleFromJellyfin = false;
 let subtitleFlagTimeout = null;
 let currentSubtitleTrack = undefined;
@@ -910,22 +1152,17 @@ async function handleMessage(sock, msg) {
                 log('info', 'queue', `🎯 Starting from index ${startIndex}`);
             }
             
+            await fetchItemInfoBatch(orderedItems);
             if (playCommand === 'PlayNext') {
                 const insertAt = queuePosition + 1;
                 playQueue.splice(insertAt, 0, ...orderedItems);
-                for (let i = 0; i < orderedItems.length; i++) {
-                    const url = `${CONFIG.serverUrl}/Videos/${orderedItems[i]}/stream?static=true&ApiKey=${accessToken}`;
-                    sendMpvCommand('loadfile', [url, 'insert-at', insertAt + i]);
-                }
+                sendMpvCommand('loadlist', [buildQueueM3u(orderedItems), 'insert-at', insertAt]);
                 log('info', 'queue', `➕ Added ${orderedItems.length} item(s) to queue after position ${queuePosition}`);
                 pushOscState();
                 return;
             } else if (playCommand === 'PlayLast') {
                 playQueue.push(...orderedItems);
-                for (const id of orderedItems) {
-                    const url = `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${accessToken}`;
-                    sendMpvCommand('loadfile', [url, 'append']);
-                }
+                sendMpvCommand('loadlist', [buildQueueM3u(orderedItems), 'append']);
                 log('info', 'queue', `➕ Appended ${orderedItems.length} item(s) to queue (total: ${playQueue.length})`);
                 pushOscState();
                 return;
@@ -1003,6 +1240,11 @@ async function handleMessage(sock, msg) {
             if (data.SubtitleStreamIndex !== undefined) {
                 pendingSubtitleStreamIndex = data.SubtitleStreamIndex === -1 ? 'no' : data.SubtitleStreamIndex;
             }
+            // Sticky request: overwritten every Play (a Play without track
+            // fields means "no preference", not "keep the old one").
+            requestedAudioStreamIndex = data.AudioStreamIndex;
+            requestedSubtitleStreamIndex = pendingSubtitleStreamIndex;
+            requestedTrackItemId = targetId;
 
             if (ipcClient && !ipcClient.destroyed && mpvProcess) {
                 loadNewQueue(targetId, finalStartPosition).catch(err => {
@@ -1069,9 +1311,17 @@ async function handleMessage(sock, msg) {
         
         if (command === 'SetAudioStreamIndex') {
             const index = parseInt(args.Index, 10);
-            if (!isNaN(index)) sendMpvCommand('set_property', ['aid', jellyfinStreamIndexToMpvId(index, 'Audio')]);
+            if (!isNaN(index)) {
+                requestedAudioStreamIndex = index;
+                requestedTrackItemId = currentItemId;
+                sendMpvCommand('set_property', ['aid', jellyfinStreamIndexToMpvId(index, 'Audio')]);
+            }
         } else if (command === 'SetSubtitleStreamIndex') {
             const index = parseInt(args.Index, 10);
+            if (!isNaN(index)) {
+                requestedSubtitleStreamIndex = index === -1 ? 'no' : index;
+                requestedTrackItemId = currentItemId;
+            }
             isSettingSubtitleFromJellyfin = true;
             if (subtitleFlagTimeout) clearTimeout(subtitleFlagTimeout);
             subtitleFlagTimeout = setTimeout(() => { isSettingSubtitleFromJellyfin = false; subtitleFlagTimeout = null; }, 5000);
@@ -1156,13 +1406,13 @@ async function handleMessage(sock, msg) {
 
                 // Rebuild MPV playlist to match new order WITHOUT restarting playback:
                 // playlist-clear keeps the currently played file (now at index 0), and
-                // insert-at places every other entry at its exact shuffled index around it.
-                const shuffleItemUrl = (id) => `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${accessToken}`;
+                // the M3U chunks are inserted at their exact shuffled indices around it.
+                await fetchItemInfoBatch(playQueue);
+                const before = playQueue.slice(0, queuePosition);
+                const after = playQueue.slice(queuePosition + 1);
                 sendMpvCommand('playlist-clear');
-                for (let i = 0; i < playQueue.length; i++) {
-                    if (i === queuePosition) continue;
-                    sendMpvCommand('loadfile', [shuffleItemUrl(playQueue[i]), 'insert-at', i]);
-                }
+                if (before.length) sendMpvCommand('loadlist', [buildQueueM3u(before), 'insert-at', 0]);
+                if (after.length) sendMpvCommand('loadlist', [buildQueueM3u(after), 'insert-at', queuePosition + 1]);
                 
                 log('info', 'queue', `🔀 Queue shuffled by server (${playQueue.length} items)`);
                 pushOscState();
@@ -1321,9 +1571,10 @@ async function fetchEpisodeInfo(itemId, silent = false) {
 
     const response = await axios.get(`${CONFIG.serverUrl}/Users/${userId}/Items/${itemId}`, {
         headers,
-        params: { fields: 'MediaStreams' }
+        params: { fields: 'MediaStreams,MediaSources' }
     });
     const item = response.data;
+    cacheItemInfo(item);
 
     // Shared payload for EVERY item type — series-only fields are layered on
     // below. Keep both branches returning this shape so no type is lopsided
@@ -1586,13 +1837,13 @@ async function loadNewQueue(itemId, startTicks) {
     pendingAudioStreamIndex = undefined;
     pendingSubtitleStreamIndex = undefined;
 
-    // Rebuild the playlist with loadfile replace + insert-at. playlist-clear is NOT
-    // safe here: it keeps the currently played file, which shifts every index by one
-    // (playlist-play-index [queuePosition] would then play the wrong item, or restart
-    // the old one when queuePosition is 0). replace swaps the whole playlist and
-    // immediately plays the target; insert-at places the remaining entries at their
-    // exact indices so the mpv playlist matches playQueue order.
-    const queueItemUrl = (id) => `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${accessToken}`;
+    // Rebuild the playlist. playlist-clear is NOT safe here: it keeps the
+    // currently played file, which shifts every index by one (playlist-play-index
+    // [queuePosition] would then play the wrong item, or restart the old one when
+    // queuePosition is 0). loadfile replace swaps the whole playlist and
+    // immediately plays the target (single-entry M3U so it carries its title);
+    // loadlist insert-at places the remaining entries at their exact indices so
+    // the mpv playlist matches playQueue order.
     if (playQueue.length === 0) {
         playQueue = [itemId];
         queuePosition = 0;
@@ -1600,11 +1851,12 @@ async function loadNewQueue(itemId, startTicks) {
         const itemIndex = playQueue.indexOf(itemId);
         queuePosition = itemIndex >= 0 ? itemIndex : Math.min(Math.max(queuePosition, 0), playQueue.length - 1);
     }
-    sendMpvCommand('loadfile', [queueItemUrl(playQueue[queuePosition]), 'replace']);
-    for (let i = 0; i < playQueue.length; i++) {
-        if (i === queuePosition) continue;
-        sendMpvCommand('loadfile', [queueItemUrl(playQueue[i]), 'insert-at', i]);
-    }
+    await fetchItemInfoBatch(playQueue);
+    sendMpvCommand('loadfile', [buildQueueM3u([playQueue[queuePosition]]), 'replace']);
+    const before = playQueue.slice(0, queuePosition);
+    const after = playQueue.slice(queuePosition + 1);
+    if (before.length) sendMpvCommand('loadlist', [buildQueueM3u(before), 'insert-at', 0]);
+    if (after.length) sendMpvCommand('loadlist', [buildQueueM3u(after), 'insert-at', queuePosition + 1]);
     queueLoadCounter = 1;
     log('info', 'queue', `📋 Loaded ${playQueue.length} items into MPV playlist (playing index ${queuePosition}).`);
 
@@ -1802,6 +2054,8 @@ async function playMedia(itemId, startTicks) {
             currentSubtitleTrack = undefined;
             currentAudioTrack = undefined;
             mpvTrackList = [];
+            streamIndexMap = { toMpv: new Map(), toJf: new Map() };
+            externalStreamsAdded.clear();
             currentEpisodeInfo = null;
             isReportingStop = false;
             isPlayingNext = false;
@@ -1863,13 +2117,13 @@ function connectToMpvIpc(gen) {
         sock.on('connect', () => {
             log('info', 'ipc', '✅ Connected to MPV IPC');
 
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (pendingStreamUrl && gen === playbackGeneration) {
                     log('info', 'ipc', '📡 Loading playlist into MPV...');
-                    for (let i = 0; i < playQueue.length; i++) {
-                        const url = `${CONFIG.serverUrl}/Videos/${playQueue[i]}/stream?static=true&ApiKey=${accessToken}`;
-                        sendMpvCommand('loadfile', [url, 'append']);
-                    }
+                    await fetchItemInfoBatch(playQueue);
+                    // One titled M3U instead of N raw URLs: the stock OSC playlist
+                    // then shows episode/movie names instead of stream URLs.
+                    sendMpvCommand('loadlist', [buildQueueM3u(playQueue), 'append']);
                     log('info', 'ipc', `    ✅ Loaded ${playQueue.length} items into playlist.`);
 
                     sendMpvCommand('playlist-play-index', [queuePosition]);
@@ -2028,6 +2282,8 @@ function killMpv() {
     isInIntroSegment = false;
     nextUpShown = false;
     mpvTrackList = [];
+    streamIndexMap = { toMpv: new Map(), toJf: new Map() };
+    externalStreamsAdded.clear();
     if (skipIntroTimeout) { clearTimeout(skipIntroTimeout); skipIntroTimeout = null; }
     if (osdRestoreTimeout) { clearTimeout(osdRestoreTimeout); osdRestoreTimeout = null; }
     for (const [, q] of pendingQueries) { if (q.timer) clearTimeout(q.timer); q.resolve(null); }
@@ -2171,11 +2427,31 @@ function handleMpvEvent(event) {
         markedWatched.clear();
         skippedSegmentIds.clear();
         isInIntroSegment = false;
+        externalStreamsAdded.clear();
 
-        // Refresh the authoritative track map (ff-index <-> per-type mpv id)
-        queryProperty('track-list').then(tl => {
-            mpvTrackList = Array.isArray(tl) ? tl : [];
-        });
+        // Refresh the track map, add external (sidecar) streams the container
+        // does not carry, and rebuild the Jellyfin<->mpv index map. The item id
+        // is resolved from the playlist entry — on auto-advance currentItemId
+        // may not have been updated yet (its resolver is also async).
+        (async () => {
+            const pos = await queryProperty('playlist-pos').catch(() => null);
+            const entry = typeof pos === 'number' ? await queryProperty(`playlist/${pos}/filename`).catch(() => null) : null;
+            const itemId = itemIdFromPlaylistEntry(entry) || currentItemId;
+            const tl = await queryProperty('track-list').catch(() => null);
+            if (Array.isArray(tl)) mpvTrackList = tl;
+            if (itemId) {
+                refreshStreamIndexMap(itemId);
+                // The map is authoritative for embedded tracks even before the
+                // externals land (it zips embedded streams by order, so a
+                // Jellyfin list that numbers externals first can't mis-map) —
+                // re-apply the requested selection now, and again after the
+                // external adds in case it targets one of those.
+                applyRequestedStreamSelection(itemId);
+                await loadExternalStreams(itemId);
+            } else {
+                refreshStreamIndexMap();
+            }
+        })().catch(err => log('warn', 'mpv', `⚠️ Track setup failed: ${err.message}`));
 
         if (pendingStartSeconds > 0) {
             const seekTo = pendingStartSeconds;
@@ -2475,11 +2751,11 @@ async function playNextEpisode() {
             });
             return;
         }
-        const url = `${CONFIG.serverUrl}/Videos/${nextEp.Id}/stream?static=true&ApiKey=${accessToken}`;
         playQueue.push(nextEp.Id);
         queuePosition = playQueue.length - 1;
         currentItemId = nextEp.Id;
-        sendMpvCommand('loadfile', [url, 'append']);
+        cacheItemInfo({ ...nextEp, Type: 'Episode' });
+        sendMpvCommand('loadlist', [buildQueueM3u([nextEp.Id]), 'append']);
         sendMpvCommand('playlist-play-index', [queuePosition]);
         return;
     }
@@ -2518,11 +2794,10 @@ async function playNextEpisode() {
                 });
                 return;
             }
-            const url = `${CONFIG.serverUrl}/Videos/${nextUpId}/stream?static=true&ApiKey=${accessToken}`;
             playQueue.push(nextUpId);
             queuePosition = playQueue.length - 1;
             currentItemId = nextUpId;
-            sendMpvCommand('loadfile', [url, 'append']);
+            sendMpvCommand('loadlist', [buildQueueM3u([nextUpId]), 'append']);
             sendMpvCommand('playlist-play-index', [queuePosition]);
         } else {
             log('info', 'queue', 'ℹ️ No more episodes, ending playback.');
@@ -2785,12 +3060,16 @@ function handleOscAction(verb, arg) {
         case 'set-sub':
             if (arg !== undefined) {
                 // OSC track ids are Jellyfin stream indices (see pushOscState) — map to mpv sid
+                requestedSubtitleStreamIndex = arg === '-1' || arg === -1 ? 'no' : Number(arg);
+                requestedTrackItemId = currentItemId;
                 const sid = arg === '-1' || arg === -1 ? 'no' : jellyfinStreamIndexToMpvId(Number(arg), 'Subtitle');
                 sendMpvCommand('set_property', ['sid', sid]);
             }
             break;
         case 'set-audio':
             if (arg !== undefined) {
+                requestedAudioStreamIndex = Number(arg);
+                requestedTrackItemId = currentItemId;
                 sendMpvCommand('set_property', ['aid', jellyfinStreamIndexToMpvId(Number(arg), 'Audio')]);
             }
             break;
