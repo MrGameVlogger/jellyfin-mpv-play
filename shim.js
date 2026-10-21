@@ -2738,9 +2738,11 @@ async function playNextEpisode() {
             log('info', 'queue', `▶️ Starting next episode: ${titleText}`);
             sendMpvCommand('set_property', ['force-media-title', `Jellyfin - ${titleText}`]);
             sendMpvCommand('set_property', ['title', `Jellyfin - ${titleText}`]);
+            beginPlaybackReporting(currentItemId);
             pushOscState();
         }).catch(err => {
             log('error', 'episode', '⚠️ Error getting episode info:', err.message);
+            beginPlaybackReporting(currentItemId);
         });
         sendMpvCommand('playlist-next');
         return;
@@ -2754,6 +2756,7 @@ async function playNextEpisode() {
         pushOscState(false);
         if (CONFIG.autoClose) {
             log('info', 'queue', 'ℹ️ Auto-close enabled, closing MPV...');
+            isStoppingPlayback = true;
             sendMpvCommand('quit');
         } else {
             log('info', 'queue', 'ℹ️ Playlist ended, MPV staying open (--keep-open=yes)');
@@ -2790,6 +2793,7 @@ async function playNextEpisode() {
         cacheItemInfo({ ...nextEp, Type: 'Episode' });
         sendMpvCommand('loadlist', [buildQueueM3u([nextEp.Id]), 'append']);
         sendMpvCommand('playlist-play-index', [queuePosition]);
+        beginPlaybackReporting(nextEp.Id);
         return;
     }
 
@@ -2832,6 +2836,7 @@ async function playNextEpisode() {
             currentItemId = nextUpId;
             sendMpvCommand('loadlist', [buildQueueM3u([nextUpId]), 'append']);
             sendMpvCommand('playlist-play-index', [queuePosition]);
+            beginPlaybackReporting(nextUpId);
         } else {
             log('info', 'queue', 'ℹ️ No more episodes, ending playback.');
             playQueue = [];
@@ -2840,6 +2845,7 @@ async function playNextEpisode() {
             pushOscState(false);
             if (CONFIG.autoClose) {
                 log('info', 'queue', 'ℹ️ Auto-close enabled, closing MPV...');
+                isStoppingPlayback = true;
                 sendMpvCommand('quit');
             } else {
                 log('info', 'queue', 'ℹ️ Playlist ended, MPV staying open (--keep-open=yes)');
@@ -2928,9 +2934,11 @@ async function playPreviousEpisode() {
             log('info', 'queue', `▶️ Starting previous episode: ${titleText}`);
             sendMpvCommand('set_property', ['force-media-title', `Jellyfin - ${titleText}`]);
             sendMpvCommand('set_property', ['title', `Jellyfin - ${titleText}`]);
+            beginPlaybackReporting(currentItemId);
             pushOscState();
         }).catch(err => {
             log('error', 'episode', '⚠️ Error getting episode info:', err.message);
+            beginPlaybackReporting(currentItemId);
         });
         sendMpvCommand('playlist-prev');
         return;
@@ -2959,6 +2967,19 @@ async function playPreviousEpisode() {
         isPlayingNext = false;
     });
     return;
+}
+
+// Kick off reporting for an item a transition jumped to. Paths that update
+// queuePosition/currentItemId THEMSELVES (manual next/prev, in-season advance,
+// NextUp) bypass the playlist-pos handler's transition block — its guard is
+// newPos !== queuePosition, which is already false by the time the event lands.
+// Those paths must call this explicitly or the server never hears the new
+// playback started (STOP for the old item, only PROGRESS for the new one —
+// scrobblers miss it and every later report carries a stale playSessionId).
+function beginPlaybackReporting(itemId) {
+    playSessionId = crypto.randomUUID();
+    reportPlaybackStart(itemId, 0);
+    startProgressReporting(itemId);
 }
 
 function reportPlaybackStart(itemId, positionTicks) {
@@ -3448,6 +3469,10 @@ function shutdown(signal) {
     const doExit = () => {
         if (doExitCalled) return;
         doExitCalled = true;
+        // Quit is initiated: the phantom pause=false during exit must not fire
+        // a progress report (its POST could outlive the process and resurrect
+        // the session on the server).
+        isStoppingPlayback = true;
         // Try graceful quit first, then force kill after timeout
         if (mpvProcess && ipcClient && !ipcClient.destroyed) {
             sendMpvCommand('quit');
