@@ -18,6 +18,21 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.14.0
+
+### Features
+- **Stock OSC usability — named playlist entries, external stream loading, accurate track mapping.** Queue entries are now loaded through in-memory M3U playlists, so mpv's own OSC playlist shows episode/movie names instead of raw stream URLs (which also keeps the ApiKey token off screen), and the title bar is correct the instant an entry starts. External (sidecar) subtitle/audio streams — which the static container stream does not carry — are now added to mpv per file with their Jellyfin display names: a movie whose subs are all external previously had *zero* subtitle tracks in mpv. The Jellyfin<->mpv stream index mapping is now explicit (embedded zipped by order, externals matched by URL) because Jellyfin numbers external streams first and its Index is not the container ff-index — track reporting and selection were wrong for such files.
+
+### Bug Fixes
+- **Movies lost all audio/subtitle track options in the OSC.** The shared item payload omitted `mediaStreams` for non-episode items, so the jf-mpv-osc state blob dropped its `subtitles`/`audio` arrays (which the OSC reads as "remove this UI"). All item types now return the same payload.
+- **Server kept showing the item as playing after a clean quit.** mpv emits a phantom `pause=false` while exiting; the resulting progress POST could land after the stop POST and Jellyfin re-stamped the session as playing. Progress is now suppressed from quit-initiation, the stopped state persists until the next playback starts, and all playback reports are serialized to the server in call order.
+- **Manual transitions never reported playback start.** Queue next/prev, in-season advance and NextUp pre-update the queue position, bypassing the `playlist-pos` transition block — the server heard STOP for the old item and only PROGRESS for the new one (scrobblers missed the start, `playSessionId` went stale). All transition paths now report explicitly, including when the item-info fetch fails.
+- **Stale async continuations mutated the wrong file and raced server writes.** Skipping during the external-stream load applied the old item's subtitle selection to the new file and rebuilt the track map from mismatched streams; "Quit and Mark Unwatched" deleted user data before the stop report rewrote it (the item came back with progress); two rapid Play commands interleaved their playlist sends. All three are now generation-guarded or sequenced on the shared report chain.
+
+### Internal
+- Live verification suites for each fix, each proven to fail on the unfixed code: transition-start (8), stop-race (5 rounds), stale-async (7), playback smoke (12). New regression guards in `tests/quality.test.mjs` pin the invariants; AGENTS.md records the mpv/Jellyfin semantics learned (report ordering, stale-async generation tokens, external stream delivery routes).
+
+---
 ## v1.13.0
 
 ### Features
