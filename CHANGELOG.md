@@ -18,6 +18,20 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.14.2
+
+### Security
+- **Bundled Node.js 22.23.1 → 22.23.4** across all three platform bundles (macOS app, Linux, Windows). Picks up the October 21, 2026 security release:
+  - **CVE-2026-106069 / CVE-2026-106072** (high / medium) — TLS certificate hostname verification bypasses; the shim validates TLS on every request when `serverUrl` is HTTPS.
+  - **CVE-2026-111497** (high) — Brotli decoder out-of-bounds write permitting remote code execution; Node's HTTP client advertises `br` encoding.
+  - **CVE-2026-105481** (medium) — keep-alive sockets could accept a response written before the request was sent.
+  - **CVE-2026-106074** (medium) — `randomUUID()`/`randomInt()` entropy caches leaked into startup snapshots, repeating values across processes (used for device IDs and play session IDs).
+  - **CVE-2026-105482** (high) — `dns.resolve` name truncation on NUL characters.
+  - **CVE-2026-106073** (low) — permission model bypass via `fs.realpathSync`.
+  - Dependency updates: c-ares, **eMudhra intermediate CA removal** (compromised CA), OpenSSL, SQLite, Undici.
+
+---
+
 ## v1.14.1
 
 ### Security
