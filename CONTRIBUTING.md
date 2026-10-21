@@ -29,7 +29,7 @@ cd macapp
 ./build.sh
 ```
 
-This compiles the Swift sources, bundles Node.js 22 LTS, and deploys to `/Applications`.
+This compiles the Swift sources, bundles Node.js 24 LTS, and deploys to `/Applications`.
 
 ## Project Structure
 

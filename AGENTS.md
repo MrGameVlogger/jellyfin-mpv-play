@@ -44,7 +44,7 @@ Node.js shim (`shim.js`) that connects to Jellyfin via WebSocket, receives play 
 
 ```bash
 npm install && npm start     # run shim directly
-cd macapp && ./build.sh      # compile Swift, bundle Node.js 22, deploy to /Applications
+cd macapp && ./build.sh      # compile Swift, bundle Node.js 24 LTS, deploy to /Applications
 cd macapp && CI=true ./build.sh  # build without deploying to /Applications
 ```
 
@@ -61,7 +61,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `data/` | Runtime state: auth tokens, playback positions, device ID (gitignored) |
 | `data/shim-<configname>.log` | Headless mode log output (created when `headless: true`) |
 | `macapp/Sources/*.swift` | Native macOS menubar app (11 files) |
-| `macapp/build.sh` | Compile Swift, bundle Node.js 22, deploy to `/Applications` |
+| `macapp/build.sh` | Compile Swift, bundle Node.js 24 LTS, deploy to `/Applications` |
 | `macapp/Info.plist` | App version — auto-synced by CI from `package.json`; don't edit manually |
 | `linux/launch.sh` | Smart launcher: detects headless config, manages systemd service |
 | `linux/jellyfin-mpv-play.desktop` | Desktop entry with actions (Launch, Headless, Quit) |
@@ -482,7 +482,7 @@ Use patterns like:
 
 ### macOS (`macapp/`)
 
-- `build.sh` compiles Swift, bundles Node.js 22.23.1 (arm64 or x64, not universal), deploys to `/Applications`
+- `build.sh` compiles Swift, bundles Node.js 24 LTS (arm64 or x64, not universal), deploys to `/Applications`
 - `setupApplicationSupport()` always overwrites `shim.js` from the bundle on launch
 - `NodeProcessManager.swift` spawns the shim, parses stdout via `processLogLine` on main thread
 - `StatusBarController.swift` manages the menu bar icon (template images for light/dark mode)

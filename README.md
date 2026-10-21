@@ -43,7 +43,7 @@
 - **Multi-Config Support** — Run multiple instances with different configs (`node shim.js config.work.js`), or same config with `--allow-duplicates` flag
 - **Better Logging** — Structured `[timestamp] [component]` format with `verbose` config option
 - **Native macOS App** — Menubar icon, notifications, preferences editor, log viewer, setup wizard, config file selector
-- **Self-Contained Bundles** — All platforms bundle Node.js 22 LTS; just install MPV and go
+- **Self-Contained Bundles** — All platforms bundle Node.js 24 LTS; just install MPV and go
 - **Built-in Help** — Reference guide accessible from the menu bar (macOS)
 
 ---
@@ -75,7 +75,7 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
    cd macapp
    ./build.sh
    ```
-   The build compiles the Swift app, downloads Node.js 22 LTS, and bundles everything into a self-contained `.app` (~175MB) deployed to `/Applications`.
+   The build compiles the Swift app, downloads Node.js 24 LTS, and bundles everything into a self-contained `.app` (~175MB) deployed to `/Applications`.
 
 3. **Remove quarantine** (required for downloaded apps):
    ```bash
@@ -567,7 +567,7 @@ MIT License — Feel free to use and modify! See [LICENSE](LICENSE).
 ## FAQ
 
 **Q: Does this work on macOS?**
-A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 22 LTS — no separate installation needed.
+A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 24 LTS — no separate installation needed.
 
 **Q: Does this work on Linux?**
 A: Yes. Download the Linux bundle from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases), extract, and run `./launch.sh`. Set `mpvPath` to `/usr/bin/mpv` (or wherever MPV is installed).
