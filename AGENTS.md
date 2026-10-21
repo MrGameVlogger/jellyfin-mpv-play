@@ -68,6 +68,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `linux/jellyfin-mpv-play.service` | Systemd user service for headless mode |
 | `windows/launch.bat` | Windows launcher with `--headless` flag support |
 | `.github/workflows/build.yml` | CI: tag-triggered, builds 3 platforms, creates GitHub Release |
+| `.github/workflows/node-lts-bump.yml` | Weekly check of the bundled Node.js pin against the latest LTS; opens a bump PR (same major) or an evaluation issue (new LTS major) |
 | `.editorconfig` | 4-space indent for JS/Swift, 2-space for YAML, CRLF for .bat |
 
 ## Architecture
@@ -772,6 +773,7 @@ open "/Applications/Jellyfin MPV Play.app"
 - **⚠️ NEVER push directly to `main`** — always create a branch and open a PR, even for docs or small fixes. The branch protection allows maintainer bypass but this should not be used.
 - **Make PRs frequently during development** — Each logical change (bug fix, feature, docs update) should be its own PR. Don't batch everything into one giant PR at release time. Small, focused PRs are easier to review and merge. When you finish a fix or feature, commit it and make a PR immediately before moving on to the next task.
 - **Dependabot**: Weekly npm dependency updates on Mondays
+- **Node LTS bump** (`.github/workflows/node-lts-bump.yml`): Weekly check of the bundled Node.js pin (`NODE_VERSION` in `macapp/build.sh` AND `.github/workflows/build.yml` — kept in lockstep, `tests/quality.test.mjs` enforces the match). Same-major LTS patches open an auto-PR; a new LTS major opens an evaluation issue (major runtime moves are deliberate). PRs from this workflow use the default `GITHUB_TOKEN`, so labeler/CI do not run on them.
 - **Auto-labeler**: PRs auto-labeled by file paths (macos, shim, documentation, ci, dependencies, images, linux, windows)
 - **Signed commits and tags**: SSH signing configured in global git config — all commits and tags should be signed
 

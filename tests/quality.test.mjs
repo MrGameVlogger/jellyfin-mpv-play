@@ -132,6 +132,30 @@ test('package.json version matches Info.plist version', () => {
   );
 });
 
+test('bundled Node.js pin matches across build.sh and build.yml', () => {
+  const buildSh = fs.readFileSync('macapp/build.sh', 'utf8');
+  const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
+
+  const shMatch = buildSh.match(/^NODE_VERSION="([^"]+)"/m);
+  const ymlMatch = workflow.match(/NODE_VERSION:\s*'([^']+)'/);
+
+  assert(shMatch, 'NODE_VERSION not found in macapp/build.sh');
+  assert(ymlMatch, "NODE_VERSION not found in .github/workflows/build.yml");
+
+  for (const ver of [shMatch[1], ymlMatch[1]]) {
+    assert(
+      /^\d+\.\d+\.\d+$/.test(ver),
+      `Node.js pin "${ver}" is not a concrete x.y.z version`
+    );
+  }
+
+  assert.strictEqual(
+    shMatch[1],
+    ymlMatch[1],
+    `Node.js pin mismatch: build.sh has ${shMatch[1]}, build.yml has ${ymlMatch[1]}`
+  );
+});
+
 test('SupportedCommands uses exact Jellyfin enum names', () => {
   const shim = fs.readFileSync('shim.js', 'utf8');
 
