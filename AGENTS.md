@@ -256,6 +256,7 @@ All functions live in `shim.js`. There are no classes — the entire app is proc
 |----------|------|-------------|
 | `playNextEpisode()` | 2638 | Advances to next episode (queue → season → NextUp → end) |
 | `playPreviousEpisode()` | 2824 | Goes to previous episode (restart if >30s, queue, or season prev) |
+| `beginPlaybackReporting(itemId)` | — | Start report + fresh playSessionId + progress interval for a transition target (required whenever a path pre-updates queue state and bypasses the playlist-pos handler) |
 
 ### Item info cache & queue construction
 
@@ -532,9 +533,10 @@ Use patterns like:
 ### Stop report vs. progress report ordering
 
 mpv emits a phantom `pause=false` ("Playback resumed") **while exiting** — the pause observer turns every pause change into a `POST /Sessions/Playing/Progress`, which can land AFTER `POST /Sessions/Playing/Stopped` (fire-and-forget over separate connections). Jellyfin's progress handler then re-stamps the session as playing and the server "disagrees" that playback stopped — intermittent, purely request-ordering. Defenses (all three needed):
-- `isStoppingPlayback` set at quit-initiation (`shim-close`, `unwatched-quit`, `shutdown`, mpv close handler) suppresses further progress reports
+- `isStoppingPlayback` set at quit-initiation (`shim-close`, `unwatched-quit`, `shutdown`, auto-close quits, mpv close handler) suppresses further progress reports
 - `isReportingStop` stays set until the next `reportPlaybackStart()`/`file-loaded` — never clear it when the stop POST lands
 - all playback reports serialize through `chainReport` (`reportChain`) so the server always processes progress before stop — and so a transition's `start(new)` can never overtake `stop(old)`
+- **manual transitions must report start explicitly**: any path that pre-updates `queuePosition`/`currentItemId` before sending `playlist-next`/`playlist-prev`/`playlist-play-index` (playNextEpisode queue-advance / in-season / NextUp, playPreviousEpisode queue path) bypasses the `playlist-pos` handler's transition block — its guard is `newPos !== queuePosition`, already false by the time the event lands. Those paths call `beginPlaybackReporting()`; without it the server hears STOP for the old item and only PROGRESS for the new one (scrobblers miss the start, `playSessionId` goes stale).
 
 ### Uncaught exceptions
 

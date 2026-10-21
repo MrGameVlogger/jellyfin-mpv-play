@@ -253,6 +253,18 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
     !/Playback stop reported correctly';\s*\n\s*isReportingStop = false;/.test(shim),
     'isReportingStop must NOT be cleared when the stop report lands (it resurrects the session)'
   );
+
+  // Paths that pre-update queuePosition/currentItemId before navigating mpv
+  // bypass the playlist-pos handler's transition block (its guard is
+  // newPos !== queuePosition) — without an explicit start report the server
+  // hears STOP for the old item and only PROGRESS for the new one. Verified
+  // against live logs: native auto-advance reports start, manual skips did not.
+  const transitionBlock = shim.slice(shim.indexOf('async function playNextEpisode'));
+  const beginCount = (transitionBlock.match(/beginPlaybackReporting\(/g) || []).length;
+  assert(
+    shim.includes('function beginPlaybackReporting') && beginCount >= 4,
+    'every manual transition (queue next/prev, in-season advance, NextUp) must call beginPlaybackReporting'
+  );
 });
 
 test('fetchEpisodeInfo returns the full payload for every item type', () => {
