@@ -76,7 +76,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 - **IPC**: Unix socket at `$XDG_RUNTIME_DIR/mpv-ipc.sock` on Linux (user-private directory), `/tmp/mpv-ipc.sock` on macOS (configurable via `ipcSocketPath` in config.js). Windows uses named pipe `\\.\pipe\mpv-ipc`.
 - **MPV flags**: `--idle=yes --keep-open=yes --save-position-on-quit=no --cache=yes` (plus optional `--fullscreen` and user `mpvFlags`)
 - **Multi-config support**: Run multiple instances with different configs: `node shim.js config.work.js`, `./launch.sh config.work.js`, `launch.bat config.work.js`. Each config gets its own deviceId, token, positions, and IPC socket. On macOS, config file selector in Preferences UI.
-- **Queue system**: `playQueue` array tracks all item IDs; `queuePosition` tracks current index. Items loaded into MPV's native playlist via `loadfile append`. MPV auto-advances through the playlist.
+- **Queue system**: `playQueue` array tracks all item IDs; `queuePosition` tracks current index. Items loaded into MPV's native playlist via `loadlist` of in-memory M3U playlists (`memory://#EXTM3U` with `#EXTINF` titles — the stock OSC playlist shows these names instead of raw stream URLs, which carry the ApiKey token). MPV auto-advances through the playlist. External (sidecar) subtitle/audio streams are added per file via `sub-add`/`audio-add` since the static container stream does not carry them.
 - **Episode transitions**: MPV's native playlist handles auto-advance. The `playlist-pos` property observer detects all playlist navigation (auto-advance, native keys, keybinds) and updates state. `loadNewQueue()` reuses the existing MPV for PlayNow commands. `playMedia()` spawns a fresh MPV (used for initial play and when IPC is down).
 - **Cross-season**: When queue is exhausted, queries `GET /Shows/NextUp` for next season's episodes.
 - **Full season queue**: Playing a single episode loads all episodes from that season into the playlist (expands around the started item, honoring StartIndex). Specials (season 0) expand to the specials season like any other season. Series-level requests (server-side expansion sorts specials first via SortName) start at the next unwatched regular episode, matching jellyfin-web; explicit specials selections play the special. When the queue is exhausted, NextUp continues into the next season.
@@ -139,6 +139,7 @@ mpv's JSON IPC protocol uses different command names than the input.conf system.
 | `add_property` | `add` | `add` is an input command. `set_property`/`get_property`/`observe_property` are IPC-specific, but `add` has no `_property` variant. |
 | `insert-at-index` | `insert-at` | The flag is `insert-at`, index is a separate third argument. `insert-at-index` was never valid — mpv silently fell back to `replace`. |
 | `set_property playlist-pos` | `playlist-play-index` | Setting `playlist-pos` only *may* start playback. `playlist-play-index` explicitly guarantees it. Use `playlist-play-index` when loading a new playlist from idle. |
+| `loadfile` on an M3U URL | `loadlist` | `loadfile` on `memory://#EXTM3U...` drops the `#EXTINF` titles for `insert-at`/`append` entries (verified on mpv 0.41). `loadlist` keeps them in every mode. Only `loadfile`+`replace` retained titles. |
 
 ### Valid IPC commands used in shim.js
 
@@ -151,6 +152,9 @@ mpv's JSON IPC protocol uses different command names than the input.conf system.
 | `cycle` | Input | `["cycle", "name"]` | Cycles property (e.g. fullscreen) |
 | `seek` | Input | `["seek", seconds, "flag"]` | Flags: `absolute`, `relative`, `absolute+keyframes` |
 | `loadfile` | Input | `["loadfile", "url", "flag", index]` | Flags: `replace`, `append`, `insert-at`. Add `+play` to force start (e.g. `append+play`). |
+| `loadlist` | Input | `["loadlist", "url", "flag", index]` | Same flags as `loadfile`; `url` may be a `memory://#EXTM3U` playlist whose `#EXTINF` titles become playlist entry titles + `media-title`. `loadfile` on an M3U URL does NOT preserve titles for `insert-at`/`append` — use `loadlist`. |
+| `sub-add` | Input | `["sub-add", "url", "flags", "title", "lang"]` | Adds an external subtitle stream. Flags: `select`, `auto` (don't hijack selection), `cached`. |
+| `audio-add` | Input | `["audio-add", "url", "flags", "title", "lang"]` | Adds an external audio stream (same shape as `sub-add`). |
 | `playlist-play-index` | Input | `["playlist-play-index", index]` | Explicitly starts playback at index |
 | `playlist-next` | Input | `["playlist-next"]` | Go to next playlist entry |
 | `playlist-prev` | Input | `["playlist-prev"]` | Go to previous playlist entry |
@@ -250,8 +254,22 @@ All functions live in `shim.js`. There are no classes — the entire app is proc
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `playNextEpisode()` | 2241 | Advances to next episode (queue → season → NextUp → end) |
-| `playPreviousEpisode()` | 2428 | Goes to previous episode (restart if >30s, queue, or season prev) |
+| `playNextEpisode()` | 2638 | Advances to next episode (queue → season → NextUp → end) |
+| `playPreviousEpisode()` | 2824 | Goes to previous episode (restart if >30s, queue, or season prev) |
+
+### Item info cache & queue construction
+
+| Function | Line | Description |
+|----------|------|-------------|
+| `buildStreamIndexMap(mediaStreams, mpvTracks, itemId)` | 153 | Explicit Jellyfin Index ↔ mpv track id map (embedded zipped by order, external by URL) |
+| `jellyfinStreamIndexToMpvId(streamIndex, type)` | 193 | Jellyfin stream index → mpv aid/sid (map first, then legacy fallbacks) |
+| `mpvTrackIdToJellyfinIndex(mpvId, type)` | 210 | mpv track id → Jellyfin stream index (inverse) |
+| `cacheItemInfo(item)` | 271 | Stores title/mediaStreams/mediaSourceId in `itemInfoCache` |
+| `fetchItemInfoBatch(ids)` | 286 | One `Ids=` batch request filling titles + streams for a queue |
+| `buildQueueM3u(ids)` | 311 | `memory://#EXTM3U` with `#EXTINF` titles + stream URLs (stock OSC playlist names) |
+| `externalStreamUrl(stream, itemId)` | 329 | Delivery URL for a sidecar subtitle/audio stream |
+| `loadExternalStreams(itemId)` | 354 | `sub-add`/`audio-add` each external stream of the loaded file |
+| `applyRequestedStreamSelection()` | 398 | Re-applies the server-requested audio/subtitle track (covers late external adds) |
 
 ### Auto-skip & OSD
 
@@ -335,6 +353,9 @@ All state is module-level variables. No state machine or stores — just mutable
 | `isMuted` | boolean | Current mute state |
 | `volumeLevel` | number | Current volume (0-100) |
 | `mpvTrackList` | array | mpv `track-list` snapshot (ff-index ↔ per-type id mapping, refreshed on `file-loaded`) |
+| `streamIndexMap` | object | `{toMpv, toJf}` explicit Jellyfin Index ↔ mpv track id maps (rebuilt on `file-loaded` and after external adds) |
+| `itemInfoCache` | Map | itemId → `{title, mediaStreams, mediaSourceId}` for the current queue (batch-fetched) |
+| `externalStreamsAdded` | Set | Sidecar stream URLs already added for the loaded file (cleared per file) |
 
 ### Coordination flags
 
@@ -394,6 +415,8 @@ All state is module-level variables. No state machine or stores — just mutable
 | `pendingStartSeconds` | number | Start position for pending stream |
 | `pendingAudioStreamIndex` | number | Audio stream to set after load |
 | `pendingSubtitleStreamIndex` | number | Subtitle stream to set after load |
+| `requestedAudioStreamIndex` | number | Sticky last server-requested audio track (re-applied after external adds) |
+| `requestedSubtitleStreamIndex` | number | Sticky last server-requested subtitle track (same) |
 
 ## Modification patterns
 
@@ -447,6 +470,7 @@ Use patterns like:
 - `loadNewQueue()` clears and rebuilds both
 - `playNextEpisode()` / `playPreviousEpisode()` modify both
 - `playlist-pos` property observer detects all playlist navigation and updates state
+- Playlist entries must be created via `buildQueueM3u()` + `loadlist` (or `loadfile` for a single-entry replace) so entries carry display names — never raw URLs, which leak `ApiKey` into the stock OSC playlist view
 
 ## Platform-specific behavior
 
@@ -614,6 +638,8 @@ The shim handles three WebSocket message types: `Play`, `Playstate`, `GeneralCom
 **Shutdown**: Sends `SessionsStop` message before closing WebSocket to prevent zombie sessions.
 
 **Jellyfin 12 notes** (verified against a live 12.x server): stream URLs use `ApiKey=` casing (thumbfast parses both); `GET /Users` returns ALL users to any authenticated caller (use `/Users/Me` when you want the caller's own user — an old `users[1]` pick would grab the wrong one); Trickplay metadata is nested `{itemId: {width: info}}` (≤10.9 sent `{width: [info]}`) — thumbfast-jellyfin v1.1.3+ parses both; a session disappears from `/Sessions` only when ALL of its WebSockets are down and reappears with the same id once any reconnects (the e2e suite's findSession waits for exactly that; tests 33-34 pin the dual-socket behavior).
+
+**External (sidecar) stream delivery** (verified live): text subs at `/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}` (srt/ass/vtt convert fine; bitmap formats like sup/pgs return 400 — no text conversion path, skip those); audio at `/Audio/{itemId}/stream?audioStreamIndex={index}&mediaSourceId={...}` — there is NO `/Videos/{id}/{ms}/Audio/{index}/stream` path (404).
 
 ## Historical context
 
