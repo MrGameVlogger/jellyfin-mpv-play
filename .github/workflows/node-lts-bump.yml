@@ -1,0 +1,132 @@
+name: Node LTS Bump
+
+on:
+  schedule:
+    - cron: '23 6 * * 1' # Mondays 06:23 UTC — hourly offsets avoid the top-of-hour stampede
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: node-lts-bump
+  cancel-in-progress: false
+
+jobs:
+  check-lts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pin with latest Node.js LTS
+        id: check
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 2 https://nodejs.org/dist/index.json -o /tmp/node-index.json
+
+          node <<'EOF'
+          const fs = require('fs');
+          const index = JSON.parse(fs.readFileSync('/tmp/node-index.json', 'utf8'));
+          const sh = fs.readFileSync('macapp/build.sh', 'utf8');
+          const yml = fs.readFileSync('.github/workflows/build.yml', 'utf8');
+
+          const shPin = (sh.match(/^NODE_VERSION="([^"]+)"/m) || [])[1];
+          const ymlPin = (yml.match(/NODE_VERSION: '([^']+)'/) || [])[1];
+          if (!shPin || !ymlPin) {
+            console.log('::error::Could not read NODE_VERSION pins (build.sh=' + shPin + ' build.yml=' + ymlPin + ')');
+            process.exit(1);
+          }
+          if (shPin !== ymlPin) {
+            console.log('::error::Pin mismatch: build.sh=' + shPin + ' build.yml=' + ymlPin + ' — fix before bumping');
+            process.exit(1);
+          }
+
+          const major = shPin.split('.')[0];
+          const lineLatest = index.find(r => r.lts !== false && r.version.startsWith('v' + major + '.'));
+          const newestLts = index.find(r => r.lts !== false);
+          const lineLatestVersion = lineLatest ? lineLatest.version.slice(1) : shPin;
+          const newestLtsVersion = newestLts ? newestLts.version.slice(1) : shPin;
+          const newestLtsMajor = newestLtsVersion.split('.')[0];
+
+          const out = [
+            'pin=' + shPin,
+            'line_latest=' + lineLatestVersion,
+            'bump=' + (lineLatestVersion !== shPin),
+            'newest_lts=' + newestLtsVersion,
+            'newer_lts_major=' + (Number(newestLtsMajor) > Number(major)),
+          ];
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, out.join('\n') + '\n');
+          console.log(out.join('\n'));
+          EOF
+
+      - name: Open bump PR
+        if: steps.check.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.check.outputs.line_latest }}
+          OLD: ${{ steps.check.outputs.pin }}
+        run: |
+          set -euo pipefail
+          BRANCH="build/node-${NEW}"
+
+          if [ "$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$BRANCH" --json number --jq 'length')" != "0" ]; then
+            echo "PR for $BRANCH already open, skipping."
+            exit 0
+          fi
+
+          sed -i "s/NODE_VERSION=\"[^\"]*\"/NODE_VERSION=\"${NEW}\"/" macapp/build.sh
+          sed -i "s/NODE_VERSION: '[^']*'/NODE_VERSION: '${NEW}'/" .github/workflows/build.yml
+
+          npm test
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add macapp/build.sh .github/workflows/build.yml
+          git commit -m "build: bump bundled Node.js to ${NEW} (LTS)"
+          git push -u origin "$BRANCH"
+
+          cat > /tmp/pr-body.md <<EOF
+          Automated LTS patch bump. Pins updated in lockstep in macapp/build.sh and .github/workflows/build.yml; npm test enforces the match.
+
+          - Current pin: ${OLD}
+          - New pin: ${NEW}
+          - Node.js changelog: https://github.com/nodejs/node/blob/main/doc/changelogs/CHANGELOG_V${NEW%%.*}.md
+
+          After merging, rebuild locally (cd macapp && ./build.sh) or cut a release so the bundles pick up the new runtime.
+          EOF
+
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "build: bump bundled Node.js to ${NEW} (LTS)" \
+            --body-file /tmp/pr-body.md
+
+      - name: Open issue for a newer LTS major
+        if: steps.check.outputs.newer_lts_major == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEWEST: ${{ steps.check.outputs.newest_lts }}
+          PIN: ${{ steps.check.outputs.pin }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'Evaluate Node.js in:title' --json number --jq 'length')" != "0" ]; then
+            echo "Tracking issue already open, skipping."
+            exit 0
+          fi
+
+          MAJOR="${NEWEST%%.*}"
+          cat > /tmp/issue-body.md <<EOF
+          Node.js ${NEWEST} is now the newest LTS line; we currently bundle ${PIN} (major ${PIN%%.*}).
+
+          Major runtime moves are deliberate, not automated. When ready:
+
+          1. Bump NODE_VERSION in macapp/build.sh and .github/workflows/build.yml (npm test enforces the match)
+          2. Update the Node.js LTS references in README.md and CONTRIBUTING.md
+          3. Rebuild and smoke-test: cd macapp && ./build.sh
+          4. Cut a release so all three platform bundles pick up the new runtime
+          EOF
+
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Evaluate Node.js ${MAJOR} LTS for the bundled runtime" \
+            --body-file /tmp/issue-body.md
