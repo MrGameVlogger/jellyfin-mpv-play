@@ -6,6 +6,7 @@ class PreferencesWindowController: NSWindowController {
     private var serverUrlField: NSTextField!
     private var usernameField: NSTextField!
     private var passwordField: NSSecureTextField!
+    private var apiKeyField: NSSecureTextField!
     private var mpvPathField: NSTextField!
     private var deviceNameField: NSTextField!
     private var deviceIdField: NSTextField!
@@ -25,7 +26,7 @@ class PreferencesWindowController: NSWindowController {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 740),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -52,7 +53,7 @@ class PreferencesWindowController: NSWindowController {
     private func setupUI() {
         guard let contentView = window?.contentView else { return }
 
-        var yOffset: CGFloat = 660
+        var yOffset: CGFloat = 700
 
         // MARK: - Config File Section
         let configLabel = sectionLabel("Config File")
@@ -123,6 +124,20 @@ class PreferencesWindowController: NSWindowController {
         passwordField.frame = NSRect(x: 130, y: yOffset, width: 410, height: 24)
         passwordField.setAccessibilityLabel("Password")
         contentView.addSubview(passwordField)
+        yOffset -= 36
+
+        // API Key (optional) — credential for the media URLs handed to MPV
+        let apiKeyLabel = NSTextField(labelWithString: "API Key:")
+        apiKeyLabel.frame = NSRect(x: 20, y: yOffset, width: 100, height: 24)
+        apiKeyLabel.alignment = .right
+        contentView.addSubview(apiKeyLabel)
+
+        apiKeyField = NSSecureTextField()
+        apiKeyField.frame = NSRect(x: 130, y: yOffset, width: 410, height: 24)
+        apiKeyField.setAccessibilityLabel("API Key")
+        apiKeyField.toolTip = "Optional. Jellyfin Dashboard \u{2192} API Keys. Media URLs in the MPV playlist use this instead of your login token, so a mid-session password change or token revocation can't kill the rest of the queue. Leave empty to use the login token."
+        apiKeyField.placeholderString = "Leave empty to use your login token"
+        contentView.addSubview(apiKeyField)
         yOffset -= 36
 
         // Test Connection
@@ -354,6 +369,8 @@ class PreferencesWindowController: NSWindowController {
         serverUrlField.stringValue = ConfigParser.extractValue(from: content, key: "serverUrl")
         usernameField.stringValue = ConfigParser.extractValue(from: content, key: "username")
         passwordField.stringValue = ConfigParser.extractValue(from: content, key: "password")
+        // Optional: empty means the shim falls back to the login token.
+        apiKeyField.stringValue = ConfigParser.extractValue(from: content, key: "apiKey")
 
         var mpvPath = ConfigParser.extractValue(from: content, key: "mpvPath")
         if mpvPath.isEmpty { mpvPath = ConfigParser.defaultMpvPath() }
@@ -440,7 +457,7 @@ class PreferencesWindowController: NSWindowController {
             return
         }
 
-        let managedKeys = ["serverUrl", "username", "password", "mpvPath", "deviceName", "deviceId",
+        let managedKeys = ["serverUrl", "username", "password", "apiKey", "mpvPath", "deviceName", "deviceId",
                            "ipcSocketPath", "mpvFlags", "fullscreen", "autoClose", "headless",
                            "autoSkipIntros", "disableSkipIntro", "verbose"]
         var lines: [String] = [
@@ -451,6 +468,12 @@ class PreferencesWindowController: NSWindowController {
             "    deviceName: '\(ConfigParser.escapeConfigValue(deviceNameField.stringValue))',",
             "    deviceId: '\(ConfigParser.escapeConfigValue(deviceIdField.stringValue))',",
         ]
+
+        // Optional — omitted when empty, so the shim falls back to the login token.
+        let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespaces)
+        if !apiKey.isEmpty {
+            lines.append("    apiKey: '\(ConfigParser.escapeConfigValue(apiKey))',")
+        }
 
         let ipcPath = ipcSocketPathField.stringValue.trimmingCharacters(in: .whitespaces)
         if !ipcPath.isEmpty {
@@ -479,7 +502,7 @@ class PreferencesWindowController: NSWindowController {
         lines.append("    disableSkipIntro: \(skipDisableRadio.state == .on ? "true" : "false"),")
         lines.append("    verbose: \(verboseCheckbox.state == .on ? "true" : "false"),")
 
-        // The panel owns all 14 keys. Everything else in the file (comments,
+        // The panel owns all 15 keys. Everything else in the file (comments,
         // user-added keys) is preserved verbatim; a managed key whose field is
         // empty is omitted (e.g. clearing MPV Flags removes the option).
         let configFileName = selectedConfigFileName()
