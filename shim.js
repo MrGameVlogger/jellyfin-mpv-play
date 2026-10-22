@@ -303,8 +303,7 @@ async function fetchItemInfoBatch(ids) {
     });
     if (!missing.length) return;
     try {
-        const response = await axios.get(`${CONFIG.serverUrl}/Users/${userId}/Items`, {
-            headers: getAuthHeaders(),
+        const response = await apiGet(`${CONFIG.serverUrl}/Users/${userId}/Items`, {
             params: {
                 Ids: missing.join(','),
                 Fields: 'MediaStreams,MediaSources,SeriesName,IndexNumber,ParentIndexNumber'
@@ -514,7 +513,7 @@ const wsSockets = {
     presence: createWsSocket('presence')
 };
 const seenMessageIds = new Set();
-let reauthInFlight = false;
+let reauthPromise = null;
 
 function anyWsOpen() {
     return Object.values(wsSockets).some(s => s.ws && s.ws.readyState === WebSocket.OPEN);
@@ -809,6 +808,40 @@ function getAuthHeaders() {
     };
 }
 
+// Coalesced reauth: every 401 path (the WS probe, apiRequest's retry) awaits
+// the SAME in-flight AuthenticateByName instead of racing a second one (two
+// logins issue two tokens and thrash the saved token file).
+function reauthenticate() {
+    if (!reauthPromise) {
+        log('info', 'auth', '🔐 Token expired, reauthenticating...');
+        showErrorOsd('Authentication expired — reconnecting...');
+        reauthPromise = authenticateUser().finally(() => { reauthPromise = null; });
+    }
+    return reauthPromise;
+}
+
+// All server HTTP goes through here so a revoked/expired token (password
+// change, admin revocation) cannot silently kill a stream of requests. The
+// WebSocket is authorized once at handshake and never re-checks the token, so
+// without this the session looked alive while every progress report 401'd —
+// the server keeps a stale "playing" session and scrobblers miss the stop.
+// One reauth + one retry per request; the retry sees the fresh token because
+// getAuthHeaders() is re-evaluated inside send().
+async function apiRequest(method, url, opts = {}) {
+    const send = () => axios({ method, url, ...opts, headers: getAuthHeaders() });
+    try {
+        return await send();
+    } catch (e) {
+        if (isShuttingDown || !e.response || e.response.status !== 401) throw e;
+        if (!(await reauthenticate())) throw e;
+        return send();
+    }
+}
+
+const apiGet = (url, opts) => apiRequest('get', url, opts);
+const apiPost = (url, data, opts) => apiRequest('post', url, { ...opts, data });
+const apiDelete = (url, opts) => apiRequest('delete', url, opts);
+
 function connectSocket(sock) {
     if (isShuttingDown || sock.isReconnecting) {
         return;
@@ -1053,12 +1086,7 @@ function scheduleReconnect(sock) {
             if (error.response && error.response.status === 401) {
                 clearInterval(sock.reconnectInterval);
                 sock.reconnectInterval = null;
-                if (reauthInFlight) return;
-                reauthInFlight = true;
-                log('info', 'auth', '🔐 Token expired, reauthenticating...');
-                showErrorOsd('Authentication expired — reconnecting...');
-                const authenticated = await authenticateUser();
-                reauthInFlight = false;
+                const authenticated = await reauthenticate();
                 if (authenticated) {
                     ensureSocketsConnected();
                 } else {
@@ -1110,9 +1138,7 @@ function reportCapabilities() {
         SupportsPersistentIdentifier: true
     };
 
-    axios.post(`${CONFIG.serverUrl}/Sessions/Capabilities/Full`, payload, { 
-        headers: getAuthHeaders()
-    })
+    apiPost(`${CONFIG.serverUrl}/Sessions/Capabilities/Full`, payload, { timeout: 10000 })
         .catch(err => {
             if (err.response && err.response.status !== 401) {
                 log('error', 'ws', '❌ Error registering capabilities:', err.message);
@@ -1618,10 +1644,7 @@ async function getEpisodeInfo(itemId, silent = false) {
 }
 
 async function fetchEpisodeInfo(itemId, silent = false) {
-    const headers = getAuthHeaders();
-
-    const response = await axios.get(`${CONFIG.serverUrl}/Users/${userId}/Items/${itemId}`, {
-        headers,
+    const response = await apiGet(`${CONFIG.serverUrl}/Users/${userId}/Items/${itemId}`, {
         params: { fields: 'MediaStreams,MediaSources' }
     });
     const item = response.data;
@@ -1643,8 +1666,7 @@ async function fetchEpisodeInfo(itemId, silent = false) {
     };
 
     if (item.Type === 'Episode') {
-        const seasonResponse = await axios.get(`${CONFIG.serverUrl}/Shows/${item.SeriesId}/Episodes`, {
-            headers,
+        const seasonResponse = await apiGet(`${CONFIG.serverUrl}/Shows/${item.SeriesId}/Episodes`, {
             params: {
                 seasonId: item.SeasonId,
                 userId: userId,
@@ -1693,9 +1715,7 @@ async function getIntroSegments(itemId) {
     isInIntroSegment = false;
     if (skipIntroTimeout) { clearTimeout(skipIntroTimeout); skipIntroTimeout = null; }
     try {
-        const headers = getAuthHeaders();
-        const response = await axios.get(`${CONFIG.serverUrl}/MediaSegments/${itemId}`, {
-            headers,
+        const response = await apiGet(`${CONFIG.serverUrl}/MediaSegments/${itemId}`, {
             params: { includeSegmentTypes: ['Intro', 'Outro'] },
             // Repeat the array keys (includeSegmentTypes=Intro&includeSegmentTypes=Outro).
             // The axios default emits PHP-style includeSegmentTypes[]=... which ASP.NET
@@ -2309,8 +2329,7 @@ async function markItemAsUnwatched(itemId) {
     // "Quit and Mark Unwatched" (OSC): reset the item to unwatched in Jellyfin
     // and drop any local resume position so quitting leaves no trace.
     try {
-        const headers = getAuthHeaders();
-        await axios.delete(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`, { headers });
+        await apiDelete(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`);
         log('info', 'report', `✅ Item marked as unwatched in Jellyfin (${itemId})`);
     } catch (error) {
         log('error', 'report', '⚠️ Error marking item as unwatched:', error.message);
@@ -2331,8 +2350,7 @@ async function markItemAsWatched(itemId) {
     if (markedWatched.has(itemId)) return true;
     markedWatched.add(itemId);
     try {
-        const headers = getAuthHeaders();
-        await axios.post(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`, {}, { headers });
+        await apiPost(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`, {});
         log('info', 'report', `✅ Item marked as watched in Jellyfin (${itemId})`);
 
         const positions = loadPlaybackPositions();
@@ -2912,13 +2930,11 @@ async function playNextEpisode() {
 }
 
 async function queryNextUp(seriesId, excludeItemId = null) {
-    const headers = getAuthHeaders();
     const maxRetries = 3;
     const retryDelay = 1000; // 1 second
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        const response = await axios.get(`${CONFIG.serverUrl}/Shows/NextUp`, {
-            headers,
+        const response = await apiGet(`${CONFIG.serverUrl}/Shows/NextUp`, {
             params: { userId, seriesId, limit: 1 }
         });
         if (response.data?.Items && response.data.Items.length > 0) {
@@ -3043,7 +3059,6 @@ function reportPlaybackStart(itemId, positionTicks) {
     // the session after the stop report.
     isStoppingPlayback = false;
     isReportingStop = false;
-    const headers = getAuthHeaders();
     
     const data = {
         ItemId: itemId,
@@ -3067,7 +3082,7 @@ function reportPlaybackStart(itemId, positionTicks) {
 
     log('info', 'report', '📡 Reporting playback start...');
     
-    return chainReport(() => axios.post(`${CONFIG.serverUrl}/Sessions/Playing`, data, { headers, timeout: 10000 })
+    return chainReport(() => apiPost(`${CONFIG.serverUrl}/Sessions/Playing`, data, { timeout: 10000 })
         .then(() => {
             log('info', 'report', '✅ Playback start reported');
         })
@@ -3102,7 +3117,6 @@ function startProgressReporting(itemId) {
 
 function reportPlaybackProgress(itemId, positionTicks) {
     if (isStoppingPlayback) return; // never let a progress report resurrect a stopped session
-    const headers = getAuthHeaders();
     
     const data = {
         ItemId: itemId,
@@ -3126,7 +3140,7 @@ function reportPlaybackProgress(itemId, positionTicks) {
 
     // Serialized on the shared chain so reports reach the server in call order.
     return chainReport(() =>
-        axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Progress`, data, { headers, timeout: 10000 })
+        apiPost(`${CONFIG.serverUrl}/Sessions/Playing/Progress`, data, { timeout: 10000 })
             .catch(e => {
                 log('error', 'report', '⚠️ Failed to report progress:', e.message);
             })
@@ -3140,8 +3154,6 @@ function reportPlaybackStop(itemId, positionTicks) {
     
     isReportingStop = true;
     isStoppingPlayback = true;
-    
-    const headers = getAuthHeaders();
     
     const data = {
         ItemId: itemId,
@@ -3159,7 +3171,7 @@ function reportPlaybackStop(itemId, positionTicks) {
     // must NOT be cleared here or a late progress report would resurrect the
     // session.
     return chainReport(() =>
-        axios.post(`${CONFIG.serverUrl}/Sessions/Playing/Stopped`, data, { headers, timeout: 10000 })
+        apiPost(`${CONFIG.serverUrl}/Sessions/Playing/Stopped`, data, { timeout: 10000 })
             .then(() => {
                 log('info', 'report', '✅ Playback stop reported correctly');
             })
@@ -3407,9 +3419,8 @@ function pushOscSkipButton(label) {
 
 // SyncPlay API functions
 async function getSyncPlayState() {
-    const headers = getAuthHeaders();
     try {
-        const response = await axios.get(`${CONFIG.serverUrl}/SyncPlay/List`, { headers, timeout: 5000 });
+        const response = await apiGet(`${CONFIG.serverUrl}/SyncPlay/List`, { timeout: 5000 });
         const groups = response.data || [];
         const groupsList = groups.map(g => ({
             id: g.GroupId,
@@ -3428,9 +3439,8 @@ async function getSyncPlayState() {
 }
 
 async function joinSyncPlayGroup(groupId) {
-    const headers = getAuthHeaders();
     try {
-        await axios.post(`${CONFIG.serverUrl}/SyncPlay/Join`, { GroupId: groupId }, { headers, timeout: 10000 });
+        await apiPost(`${CONFIG.serverUrl}/SyncPlay/Join`, { GroupId: groupId }, { timeout: 10000 });
         log('info', 'syncplay', `Joined SyncPlay group: ${groupId}`);
         // Server will send GroupJoined update, but set locally as fallback
         currentSyncPlayGroupId = groupId;
@@ -3441,9 +3451,8 @@ async function joinSyncPlayGroup(groupId) {
 }
 
 async function leaveSyncPlayGroup() {
-    const headers = getAuthHeaders();
     try {
-        await axios.post(`${CONFIG.serverUrl}/SyncPlay/Leave`, {}, { headers, timeout: 10000 });
+        await apiPost(`${CONFIG.serverUrl}/SyncPlay/Leave`, {}, { timeout: 10000 });
         log('info', 'syncplay', 'Left SyncPlay group');
         // Server will send GroupLeft update, but set locally as fallback
         currentSyncPlayGroupId = null;
@@ -3455,9 +3464,8 @@ async function leaveSyncPlayGroup() {
 }
 
 async function createSyncPlayGroup() {
-    const headers = getAuthHeaders();
     try {
-        await axios.post(`${CONFIG.serverUrl}/SyncPlay/New`, {}, { headers, timeout: 10000 });
+        await apiPost(`${CONFIG.serverUrl}/SyncPlay/New`, {}, { timeout: 10000 });
         log('info', 'syncplay', 'Created new SyncPlay group');
         pushOscState();
     } catch (e) {
@@ -3468,12 +3476,11 @@ async function createSyncPlayGroup() {
 async function toggleFavorite() {
     if (!currentItemId) return;
     try {
-        const headers = getAuthHeaders();
         const isFavorite = currentEpisodeInfo?.userData?.IsFavorite;
         if (isFavorite) {
-            await axios.delete(`${CONFIG.serverUrl}/Users/${userId}/FavoriteItems/${currentItemId}`, { headers });
+            await apiDelete(`${CONFIG.serverUrl}/Users/${userId}/FavoriteItems/${currentItemId}`);
         } else {
-            await axios.post(`${CONFIG.serverUrl}/Users/${userId}/FavoriteItems/${currentItemId}`, {}, { headers });
+            await apiPost(`${CONFIG.serverUrl}/Users/${userId}/FavoriteItems/${currentItemId}`, {});
         }
         if (currentEpisodeInfo?.userData) {
             currentEpisodeInfo.userData.IsFavorite = !isFavorite;
