@@ -190,6 +190,7 @@ All options go in `config.js` (copy from `config.example.js`):
 | `serverUrl` | string | **required** | Jellyfin server URL (e.g. `http://192.168.1.10:8096`) |
 | `username` | string | **required** | Jellyfin username |
 | `password` | string | **required** | Jellyfin password |
+| `apiKey` | string | `''` (falls back to the access token) | Jellyfin API key (Dashboard → API Keys) used in media URLs handed to mpv — survives token reauth so a mid-session token invalidation can't kill the rest of the queue |
 | `mpvPath` | string | `"mpv"` | Path to MPV binary |
 | `deviceName` | string | `"Jellyfin MPV Play"` | Display name in Jellyfin session |
 | `deviceId` | string | auto-generated | Unique device ID (must differ from `deviceName` per Jellyfin) |

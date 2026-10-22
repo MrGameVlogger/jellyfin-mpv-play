@@ -19,6 +19,15 @@ module.exports = {
     
     // Any name, but different from the one you put in deviceName
     deviceId: 'jellyfin-mpv-play',
+
+    // Optional: Jellyfin API key (Dashboard → API Keys → Generate)
+    // Used for the media URLs handed to MPV (queue entries, external subs).
+    // Those URLs live for the whole session — if they carry your user token
+    // and the token gets invalidated mid-binge (password change, admin
+    // revoke), every remaining queue entry fails with 401. An API key is not
+    // tied to the session token and survives reauthentication. Leave unset to
+    // use your access token instead.
+    // apiKey: 'your-api-key-here',
     
     // IPC socket path (optional — defaults to $XDG_RUNTIME_DIR/mpv-ipc.sock on Linux, /tmp/mpv-ipc.sock on macOS, \\.\pipe\mpv-ipc on Windows)
     // ipcSocketPath: '/tmp/mpv-ipc.sock'
