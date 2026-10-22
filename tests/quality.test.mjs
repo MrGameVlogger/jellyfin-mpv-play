@@ -312,6 +312,24 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
     /chainReport\(\(\) => markItemAsUnwatched/.test(shim),
     'unwatched-quit delete must be chained after the stop report'
   );
+
+  // The WebSocket is authorized only at handshake and never re-checks the
+  // token, so a revoked token leaves the session "alive" while every HTTP
+  // report 401s — the server keeps a stale playing session. All authenticated
+  // HTTP must flow through apiRequest: one coalesced reauth + one retry.
+  assert(
+    shim.includes('function apiRequest') && shim.includes('function reauthenticate'),
+    'authenticated requests must share the 401-reauth retry path (apiRequest)'
+  );
+  assert(
+    !shim.includes('reauthInFlight'),
+    'reauth must be coalesced via a shared promise, not a boolean guard'
+  );
+  const rawSessionsPosts = (shim.match(/axios\.post\(`\$\{CONFIG\.serverUrl\}\/Sessions\/Playing/g) || []).length;
+  assert(
+    rawSessionsPosts === 0,
+    'playback reports must go through apiPost (401 recovery), not raw axios'
+  );
 });
 
 test('fetchEpisodeInfo returns the full payload for every item type', () => {
