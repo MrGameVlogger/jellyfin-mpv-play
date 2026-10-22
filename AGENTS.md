@@ -432,7 +432,8 @@ All state is module-level variables. No state machine or stores — just mutable
 1. Add the option to `config.example.js` with a default value and comment
 2. Add it to the `CONFIG` object in `shim.js` (line 12-29): `optionName: userConfig.optionName || defaultValue`
 3. Use `CONFIG.optionName` throughout the code
-4. Update AGENTS.md config table, README.md, CONTRIBUTING.md if relevant
+4. Add it to the macOS Settings panel (`macapp/Sources/PreferencesWindowController.swift`): field declaration, `setupUI` row, `loadConfig`, and `saveConfig` (`managedKeys` + a line appended only when non-empty for optional keys). Without this the option is invisible to Mac users. `tests/config.test.mjs` guards `apiKey` specifically.
+5. Update AGENTS.md config table, README.md, CONTRIBUTING.md if relevant
 
 ### Adding a new PlaystateCommand
 

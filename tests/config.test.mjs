@@ -98,3 +98,17 @@ test('config.example.js documents all CONFIG options', () => {
     );
   }
 });
+
+test('macOS Preferences panel supports apiKey', () => {
+  const prefs = fs.readFileSync('macapp/Sources/PreferencesWindowController.swift', 'utf8');
+
+  // The Settings panel is the macOS config editor — an option that exists only
+  // in config.example.js is invisible to Mac users. apiKey must be a managed
+  // key (load + save) so it round-trips through the UI.
+  assert(prefs.includes('private var apiKeyField'), 'Preferences must declare an apiKey field');
+  assert(/"apiKey"/.test(prefs), 'Preferences must manage the "apiKey" config key');
+  assert(
+    prefs.includes('key: "apiKey"'),
+    'Preferences must read apiKey from the config on load'
+  );
+});
