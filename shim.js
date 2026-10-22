@@ -2423,7 +2423,13 @@ function sendMpvCommand(command, args = []) {
 
     try {
         const cmdStr = JSON.stringify(cmd) + '\n';
-        const logArgs = args.map(arg => typeof arg === 'string' && (arg.includes('api_key=') || arg.includes('ApiKey=')) ? redact(arg) : arg);
+        // Every arg goes through redact() — queue M3U and sub-add URLs embed the
+        // ApiKey. A runtime includes('ApiKey=') guard is NOT a taint barrier:
+        // taint tracking explores both ternary branches, so the un-redacted
+        // branch carried the key to the logger (CodeQL js/clear-text-logging).
+        // The barrier is the redact(...) call node itself, so the call must stay
+        // explicit — args.map(redact) has no such node (callee name is "map").
+        const logArgs = args.map(arg => redact(arg));
         log('debug', 'mpv', '→', command, ...logArgs);
         ipcClient.write(cmdStr);
     } catch (e) {

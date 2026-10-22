@@ -385,3 +385,24 @@ test('macos app matches the shim log contracts', () => {
     assert(npm.includes(marker), `NodeProcessManager missing matcher for: "${marker}"`);
   }
 });
+
+test('mpv command logging cannot leak the ApiKey', () => {
+  const shim = fs.readFileSync('shim.js', 'utf8');
+
+  // CodeQL js/clear-text-logging: the ternary in logArgs passed raw args
+  // whenever they didn't literally contain "ApiKey=" — taint tracking explores
+  // both branches regardless, so queue M3U / sub-add URLs carried CONFIG.apiKey
+  // straight to the log() sink. redact() is the barrier (its name matches
+  // notSensitiveRegexp), and it must be invoked as a plain call —
+  // args.map(redact) has no "redact" callee node for the barrier to attach to.
+  const sendMpvCommand = shim.slice(shim.indexOf('function sendMpvCommand'));
+  const logArgs = sendMpvCommand.slice(0, sendMpvCommand.indexOf('function queryProperty'));
+  assert(
+    /const logArgs = args\.map\(arg => redact\(arg\)\)/.test(logArgs),
+    'sendMpvCommand must redact every logged arg via a direct redact() call'
+  );
+  assert(
+    !/arg\.includes\(/.test(logArgs),
+    'sendMpvCommand logging must not branch on arg content (not a taint barrier)'
+  );
+});
