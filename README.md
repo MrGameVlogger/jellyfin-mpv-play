@@ -145,6 +145,7 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
        mpvPath: '/usr/bin/mpv',
        deviceName: 'My-PC',
        deviceId: 'my-pc',
+       // apiKey: '',             // Optional: API key for media URLs (survives token reauth)
        // fullscreen: true,       // Start MPV in fullscreen
        // autoClose: true,         // Close app when queue finishes
        // mpvFlags: [],            // Extra MPV flags

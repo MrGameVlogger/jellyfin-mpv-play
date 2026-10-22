@@ -332,6 +332,25 @@ test('regression guards for verified mpv and Jellyfin semantics', () => {
   );
 });
 
+test('media stream URLs carry a stable credential, not the session token', () => {
+  const shim = fs.readFileSync('shim.js', 'utf8');
+
+  // Media URLs are handed to mpv and fetched later (auto-advance through the
+  // queue M3U, thumbfast, external subs) without asking the shim — they must
+  // NOT depend on the session token, which can be invalidated mid-binge
+  // (password change, admin revoke). config.apiKey (with the token as
+  // fallback) is the only acceptable credential there. Verified against a
+  // live log: an invalidated token 401'd every remaining queue entry.
+  assert(
+    /function mediaApiKey[\s\S]{0,200}CONFIG\.apiKey \|\| accessToken/.test(shim),
+    'media URLs must use mediaApiKey() (config.apiKey with token fallback)'
+  );
+  assert(
+    (shim.match(/ApiKey=\$\{mediaApiKey\(\)\}/g) || []).length >= 3,
+    'queue, external-stream and pending stream URLs must all use mediaApiKey()'
+  );
+});
+
 test('fetchEpisodeInfo returns the full payload for every item type', () => {
   const shim = fs.readFileSync('shim.js', 'utf8');
   const start = shim.indexOf('async function fetchEpisodeInfo');

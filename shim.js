@@ -40,6 +40,7 @@ const CONFIG = {
     serverUrl: userConfig.serverUrl,
     username: userConfig.username,
     password: userConfig.password,
+    apiKey: userConfig.apiKey || '',
     mpvPath: userConfig.mpvPath,
     deviceName: userConfig.deviceName,
     deviceId: userConfig.deviceId || generateOrLoadDeviceId(),
@@ -256,8 +257,19 @@ async function resyncQueueFromPlaylist() {
 // preserve them for insert-at/append.)
 const itemInfoCache = new Map(); // itemId -> { title, mediaStreams, mediaSourceId }
 
+// Credential for URLs that outlive a token rotation. mpv holds the queue M3U
+// (and thumbfast/external sub URLs) for the whole session and fetches them on
+// auto-advance without asking us — if those carry the user access token and
+// the token is invalidated mid-binge (password change, admin revoke), every
+// remaining entry 401s and the binge dies at the current episode with no
+// visible reason. A dedicated API key (Dashboard → API Keys) is not tied to
+// the session token and survives reauth; fall back to the token when unset.
+function mediaApiKey() {
+    return CONFIG.apiKey || accessToken;
+}
+
 function queueItemUrl(id) {
-    return `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${accessToken}`;
+    return `${CONFIG.serverUrl}/Videos/${id}/stream?static=true&ApiKey=${mediaApiKey()}`;
 }
 
 function buildItemTitle(item) {
@@ -329,7 +341,7 @@ function externalStreamUrl(stream, itemId = currentItemId) {
     const info = itemInfoCache.get(itemId) || {};
     const mediaSourceId = info.mediaSourceId || itemId;
     if (!mediaSourceId) return null;
-    const token = `ApiKey=${accessToken}`;
+    const token = `ApiKey=${mediaApiKey()}`;
     if (stream.Type === 'Subtitle') {
         if (!stream.IsTextSubtitleStream) {
             // The conversion endpoint only outputs text formats (verified: srt/
@@ -1986,7 +1998,7 @@ async function playMedia(itemId, startTicks) {
 
     playSessionId = crypto.randomUUID();
 
-    pendingStreamUrl = `${CONFIG.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${accessToken}`;
+    pendingStreamUrl = `${CONFIG.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${mediaApiKey()}`;
     pendingStartSeconds = startTicks / 10000000;
 
     log('info', 'mpv', '🍿 Launching MPV (Idle Mode)...');
