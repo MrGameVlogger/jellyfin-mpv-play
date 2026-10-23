@@ -1248,6 +1248,56 @@ t(37, 'shutdown while sockets are mid-handshake: no crash (closeAllWs regression
     await connectIpcWhenReady().catch(() => {});
 });
 
+t(38, 'completed item ends watched with NO resume position (server or local)', async ({ items }) => {
+    // Regression: an item played to its end used to finish as Played=true WITH a
+    // resume position in Jellyfin (stuck in Continue Watching) plus a local
+    // playback_positions entry — the stop report re-wrote the position after
+    // markPlayed (a wrong RunTimeTicks keeps Jellyfin's own MaxResumePct check
+    // from zeroing it) and the mpv close handler re-saved locally right after
+    // the watched-mark cleared the entry.
+    const fx = items.movie;
+    await stopShim();
+    writeConfig({ autoClose: true });
+    startShim();
+    await waitFor('WebSocket connection established', 30000);
+    try {
+        // deterministic starting state: unplayed
+        await del(`/Users/${authHeaders.userId}/PlayedItems/${fx.Id}`);
+        await playAndWait(fx.Id);
+        const dur = await mpvGet('duration');
+        check(typeof dur === 'number' && dur > 10, `unexpected duration ${JSON.stringify(dur)}`);
+        await seekWhenReady(dur - 0.4);
+        // The near-end poll (dur-1) usually finishes the item before mpv's own
+        // eof event lands — any of these marks completion.
+        await waitFor(/End of file reached|Near end of last item|Auto-close enabled/, 30000);
+        await waitFor('Auto-close enabled', 20000);
+        await sleep(2500); // let the stop report + markPlayed land and mpv close out
+
+        // server: watched AND no resume position
+        const r = await get(`/Users/${authHeaders.userId}/Items/${fx.Id}`, { fields: 'UserData' });
+        const ud = r.data.UserData || {};
+        check(ud.Played, `item not marked watched after completion (UserData=${JSON.stringify(ud)})`);
+        check(!ud.PlaybackPositionTicks, `resume position left on completed item: ${ud.PlaybackPositionTicks}`);
+
+        // local: no entry in the resume file
+        const posFile = path.join(ROOT, 'data', `playback_positions_${TEST_ID}.json`);
+        const saved = fs.existsSync(posFile) ? JSON.parse(fs.readFileSync(posFile, 'utf8')) : {};
+        check(!saved[fx.Id], `local resume position saved for completed item: ${JSON.stringify(saved[fx.Id])}`);
+
+        // mpv's exit phantom must not claim the show resumed — anchor at the
+        // stop report, which always precedes the quit that triggers the phantom
+        const eofAt = shimOut.indexOf('Reporting playback stop');
+        check(eofAt >= 0, 'stop report not logged');
+        check(!/Playback resumed/.test(shimOut.slice(eofAt)), 'phantom "Playback resumed" logged after the stop report');
+    } finally {
+        await stopShim();
+        writeConfig();
+        startShim();
+        await waitFor('WebSocket connection established', 30000);
+        await connectIpcWhenReady().catch(() => {});
+    }
+});
+
 t(23, 'security: token never appears in shim logs', async () => {
     const r = await api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
         headers: { 'Content-Type': 'application/json', Authorization: `MediaBrowser Client="x", Device="x", DeviceId="tokcheck", Version="1.0"` }
