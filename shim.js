@@ -552,6 +552,14 @@ function closeAllWs() {
         if (sock.ws) {
             try {
                 sock.ws.removeAllListeners();
+                // ws.close() on a socket still CONNECTING aborts the handshake
+                // and emits 'error' ASYNCHRONOUSLY (abortHandshake →
+                // process.nextTick(emitErrorAndClose)) — the try/catch above
+                // cannot see it, and with the listeners just removed an
+                // emitted 'error' becomes an uncaughtException: a crash dialog
+                // while quitting with a reconnect in flight. Keep a swallow
+                // handler for exactly that emit.
+                sock.ws.on('error', () => {});
                 sock.ws.close();
             } catch (e) {}
             sock.ws = null;
@@ -861,6 +869,9 @@ function connectSocket(sock) {
     if (sock.ws) {
         try {
             sock.ws.removeAllListeners();
+            // Same as closeAllWs: close() on a CONNECTING socket emits an
+            // async 'error' after the listeners are gone — swallow it.
+            sock.ws.on('error', () => {});
             sock.ws.close();
         } catch (e) {
         }
@@ -3593,6 +3604,12 @@ process.on('uncaughtException', (err) => {
     }
     log('error', 'main', '❌ Uncaught exception:', err);
     writeCrashLog('uncaughtException', err);
+    if (isShuttingDown) {
+        // Already tearing down (observed: ws emitting a close-time 'error'
+        // during SIGTERM shutdown). The exit timer in doExit finishes the job —
+        // no dialog, no second teardown.
+        return;
+    }
     showHeadlessErrorDialog('Uncaught Exception', `An unexpected error occurred:\n\n${err.message || err}`);
     shutdown('uncaughtException');
 });
@@ -3600,9 +3617,11 @@ process.on('unhandledRejection', (reason) => {
     if (isBrokenPipe(reason)) {
         return;
     }
-    if (isBrokenPipe(reason)) { return; }
     log('error', 'main', '❌ Unhandled rejection:', reason);
     writeCrashLog('unhandledRejection', reason);
+    if (isShuttingDown) {
+        return;
+    }
     showHeadlessErrorDialog('Unhandled Rejection', `An unexpected error occurred:\n\n${reason?.message || reason}`);
     shutdown('unhandledRejection');
 });
@@ -3621,9 +3640,10 @@ function writeCrashLog(type, error) {
         console.error(`Crash log written to: ${crashFile}`);
 
         // Rate-limit the dialog: a repeating failure must not spawn hundreds of
-        // windows (observed with EPIPE dialog storms).
+        // windows (observed with EPIPE dialog storms). And never during
+        // shutdown — a close-time ws 'error' while quitting is not news.
         const now = Date.now();
-        if (now - lastCrashDialogAt < 30000) return;
+        if (isShuttingDown || now - lastCrashDialogAt < 30000) return;
         lastCrashDialogAt = now;
         const dialogMessage = `Jellyfin MPV Play crashed: ${type}\n\n${message.substring(0, 500)}`;
         showErrorDialog('Jellyfin MPV Play - Crash', dialogMessage);
