@@ -560,9 +560,11 @@ Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to 
 
 ## Testing approach
 
-**WS resilience tests**: test 33 proves the server mechanism with raw sockets (two sockets = one session; session survives one close, dies with the last); test 34 is the user-visible acceptance test — the shim runs behind a TCP proxy in the suite and one connection is killed mid-flight while `/Sessions` is polled continuously (it must never blip). The proxy (`startWsProxy`) is also the pattern to reuse for any future network-glitch simulation.
+**WS resilience tests**: test 33 proves the server mechanism with raw sockets (two sockets = one session; session survives one close, dies with the last); test 34 is the user-visible acceptance test — the shim runs behind a TCP proxy in the suite and one connection is killed mid-flight while `/Sessions` is polled continuously (it must never blip). The proxy (`startWsProxy`) is also the pattern to reuse for any future network-glitch simulation — its `{ stallUpgrades: true }` mode keeps client sockets CONNECTING forever (test 37's shutdown regression: closeAllWs must not crash on them). Test 35 covers the apiKey URL/redaction contract; test 36 revokes the shim's token via a same-device re-login and asserts reauth recovery.
 
 **Test-run hygiene**: every shim the suite spawns gets `JELLYFIN_MPV_NO_DIALOGS=1` — a test with a broken config must never raise the native error dialog on the user's desktop (it once did: a misconfigured proxy test popped "Authentication Failed"). Ad-hoc test shims must set it too. Identity checks in the suite must use mpv's `path` (never `filename` — for stream URLs that is just `stream?static=true&ApiKey=…` and cannot contain the item id).
+
+**Never run the live suite (or probes) while the owner is using the server.** The suite plays NextUp items and rewrites UserData (played/position/favorite) around every test — run concurrently with real viewing it reverts the viewer's watched marks ("had to mark them again"), floods their sessions with UserDataChanged, and destabilizes the web UI (observed live 2026-10-23). The suite now refuses to start when another session has `NowPlayingItem` set (`--force` overrides). Ad-hoc probe scripts must use their own throwaway `DeviceId` — authenticating with the real device's id (e.g. the shim's `Matteo-Mac`) invalidates that device's live token and kicks its sockets ("System Shutdown" + reauth storms mid-playback).
 
 **Automated tests** (`npm test`):
 

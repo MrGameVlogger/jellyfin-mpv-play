@@ -5,6 +5,12 @@
 //     npm run test:e2e            run everything
 //     npm run test:e2e -- --only 9,16   run selected test numbers
 //
+// The suite plays NextUp items and rewrites UserData (played/position/
+// favorite) around every test. It REFUSES to run while another session is
+// actively playing on the account (--force overrides) — running it alongside a
+// live viewer fights their watch marks and floods their web UI with
+// UserDataChanged churn.
+//
 // The suite runs headless (vo=null/ao=null via mpvFlags) on an isolated session
 // (own deviceId + own IPC socket) so it never touches a production device or
 // pops up windows. Everything the run mutates on the server (Played, resume
@@ -44,19 +50,26 @@ function check(cond, msg) {
 }
 function eq(a, b, msg) { check(JSON.stringify(a) === JSON.stringify(b), `${msg} (got ${JSON.stringify(a)}, want ${JSON.stringify(b)})`); }
 function near(a, b, tol, msg) { check(Math.abs(a - b) <= tol, `${msg} (got ${a}, want ~${b} ±${tol})`); }
+// A fixture-dependent early return. Skips are counted and reported SEPARATELY
+// from passes — a test that exercised nothing must never read as ✅ PASS (tests
+// 18/19 once no-op'd on a last-in-season fixture and still claimed success).
+function skip(msg) { current.skipped = true; current.details.push(msg); }
 
 // ---------- Jellyfin API ----------
 const api = axios.create({ baseURL: cfg.serverUrl, timeout: 15000 });
 let authHeaders;
 async function login(deviceId) {
-    const r = await api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
+    const r = await netRetry(() => api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
         headers: { 'Content-Type': 'application/json', Authorization: `MediaBrowser Client="${TEST_NAME}", Device="${TEST_NAME}", DeviceId="${deviceId}", Version="1.0.0"` }
-    });
+    }));
     return { Authorization: `MediaBrowser Token="${r.data.AccessToken}", Client="${TEST_NAME}", Device="${TEST_NAME}", DeviceId="${deviceId}", Version="1.0.0"`, userId: r.data.User.Id };
 }
 const netRetry = async (fn) => {
     try { return await fn(); } catch (e) {
-        if (e.code === 'ECONNRESET' || /socket hang up|ECONNRESET|network/i.test(String(e.message))) {
+        // transient network blips are common against a remote server (seen:
+        // ETIMEDOUT flaps and TLS "wrong version number" on half-dead
+        // connections) — retry once on anything transport-level before failing
+        if (/ECONNRESET|ECONNABORTED|ETIMEDOUT|EPROTO|EPIPE|socket hang up|network|timeout/i.test(`${e.code || ''} ${e.message}`)) {
             await sleep(1500);
             return await fn();
         }
@@ -360,13 +373,14 @@ async function connectIpcWhenReady(timeoutMs = 25000) {
 // ---------- config fixture ----------
 // Escape for a JS single-quoted string: backslashes first, then quotes.
 const jsStr = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-function writeConfig({ autoClose = false, headless = true, extraMpvFlags = [], serverUrl = cfg.serverUrl } = {}) {
+function writeConfig({ autoClose = false, headless = true, extraMpvFlags = [], serverUrl = cfg.serverUrl, apiKey = '' } = {}) {
     const flags = ['--vo=null', '--ao=null', '--force-window=no', ...extraMpvFlags]
         .map(f => `'${jsStr(f)}'`).join(', ');
     fs.writeFileSync(TMP_CONFIG, `module.exports = {
     serverUrl: '${jsStr(serverUrl)}',
     username: '${jsStr(cfg.username)}',
     password: '${jsStr(cfg.password)}',
+    apiKey: '${jsStr(apiKey)}',
     mpvPath: '${jsStr(cfg.mpvPath)}',
     deviceName: '${TEST_NAME}',
     deviceId: '${TEST_ID}',
@@ -402,8 +416,12 @@ async function discoverItems() {
     }
     check(items.multiTrack, 'no multi-track episode in library');
 
-    // an episode with a season behind it (for queue/advance tests) + segments
+    // an episode with a season behind it (for queue/advance tests) + segments.
+    // Prefer one with a FOLLOWING episode in the season: tests 18/19 (next-up,
+    // auto-advance) exercise seasonList[seasonIndex + 1] and were silently
+    // skipping whenever discovery happened to pick the season's last episode.
     const nextUp = await get('/Shows/NextUp', { userId: authHeaders.userId, limit: 5 });
+    let fallback = null;
     for (const ep of nextUp.data.Items || []) {
         const full = await get(`/Users/${authHeaders.userId}/Items/${ep.Id}`, { fields: 'MediaStreams,RunTimeTicks,UserData' });
         const segs = await get(`/MediaSegments/${ep.Id}`, { includeSegmentTypes: ['Intro', 'Outro'] });
@@ -411,12 +429,30 @@ async function discoverItems() {
         const list = (season.data.Items || []).sort((a, b) => a.IndexNumber - b.IndexNumber);
         const idx = list.findIndex(e => e.Id === ep.Id);
         if (idx >= 0 && list.length >= 2 && list.every(e => e.ParentIndexNumber > 0)) {
-            items.episode = { ...full.data, seasonList: list, seasonIndex: idx, segments: segs.data.Items || [] };
-            // Same id set the shim's expansion uses; specials-free so a shuffled
-            // first item cannot trigger the season-0 NextUp redirect.
-            items.shuffleSeason = list;
-            break;
+            const cand = { full: full.data, segs: segs.data.Items || [], list, idx };
+            if (idx < list.length - 1) {
+                items.episode = { ...full.data, seasonList: list, seasonIndex: idx, segments: cand.segs };
+                // Same id set the shim's expansion uses; specials-free so a shuffled
+                // first item cannot trigger the season-0 NextUp redirect.
+                items.shuffleSeason = list;
+                break;
+            }
+            if (!fallback) fallback = cand;
         }
+    }
+    if (!items.episode && fallback) {
+        // NextUp can point at a season's last episode (e.g. after earlier runs
+        // marked the middle ones played). The fixture only needs SOME episode
+        // with a follower — step one back within the same season.
+        let f = fallback;
+        if (f.idx > 0) {
+            const prev = f.list[f.idx - 1];
+            const full = await get(`/Users/${authHeaders.userId}/Items/${prev.Id}`, { fields: 'MediaStreams,RunTimeTicks,UserData' });
+            const segs = await get(`/MediaSegments/${prev.Id}`, { includeSegmentTypes: ['Intro', 'Outro'] });
+            f = { full: full.data, segs: segs.data.Items || [], list: f.list, idx: f.idx - 1 };
+        }
+        items.episode = { ...f.full, seasonList: f.list, seasonIndex: f.idx, segments: f.segs };
+        items.shuffleSeason = f.list;
     }
     check(items.episode, 'no NextUp episode with a multi-episode season found');
 
@@ -693,7 +729,7 @@ t(16, 'skip intro: S-key wire path seeks past the segment', async ({ items }) =>
     // fixture can drift between runs.
     const segResp = await get(`/MediaSegments/${ep.Id}`, { includeSegmentTypes: ['Intro', 'Outro'] });
     const seg = (segResp.data?.Items || []).find(s => s.Type === 'Intro');
-    if (!seg) { current.details.push('no Intro segment on the chosen episode - skipped'); return; }
+    if (!seg) return skip('no Intro segment on the chosen episode');
     await playAndWait(ep.Id);
     const dur = await mpvGet('duration');
     check(typeof dur === 'number' && dur > 5, `unexpected duration ${JSON.stringify(dur)}`);
@@ -725,7 +761,7 @@ t(17, 'OSC wire path: toggle-favorite flips favorite in Jellyfin', async ({ item
 t(18, 'next-up notification fires near the end of an episode', async ({ items }) => {
     const ep = items.episode;
     const nextEp = ep.seasonList[ep.seasonIndex + 1];
-    if (!nextEp) { current.details.push('chosen episode is last in season — skipped'); return; }
+    if (!nextEp) return skip('chosen episode is last in season');
     await playAndWait(items.episode.Id);
     const dur = await mpvGet('duration');
     check(typeof dur === 'number' && dur > 30, `unexpected duration ${dur}`);
@@ -737,7 +773,7 @@ t(18, 'next-up notification fires near the end of an episode', async ({ items })
 t(19, 'auto-advance: reaching EOF moves to the next episode', async ({ items }) => {
     const ep = items.episode;
     const nextEp = ep.seasonList[ep.seasonIndex + 1];
-    if (!nextEp) { current.details.push('chosen episode is last in season — skipped'); return; }
+    if (!nextEp) return skip('chosen episode is last in season');
     await playAndWait(items.episode.Id);
     const dur = await mpvGet('duration');
     await seekWhenReady(dur - 0.4);
@@ -835,7 +871,7 @@ t(22, 'SyncPlay: create, leave, and join groups through the OSC wire path', asyn
 });
 t(25, 'specials rule: series play starts past specials, explicit special plays itself', async ({ items }) => {
     const fx = items.seriesWithSpecials;
-    if (!fx) { current.details.push('no series with specials in library - skipped'); return; }
+    if (!fx) return skip('no series with specials in library');
     // series-level play: the server expands a series id by SortName ("0x1 ..." first),
     // so a special leads the list — playback must still start at a regular episode
     // (season 1 for a new series), matching jellyfin-web's client-side resolution.
@@ -950,7 +986,7 @@ t(29, 'sub_style: correct defaults reported; size/position/color work on ASS sub
     // (unreliable and destructive); sub-scale applies to ASS under the default
     // sub-ass-override=scale.
     const fx = items.assItem;
-    if (!fx) { current.details.push('no ASS-subtitled item in library - skipped'); return; }
+    if (!fx) return skip('no ASS-subtitled item in library');
     await playAndWait(fx.Id);
     await sleep(600);
     // make sure an ASS track is actually selected for the assertions below
@@ -993,7 +1029,7 @@ t(29, 'sub_style: correct defaults reported; size/position/color work on ASS sub
 
 t(30, 'sub_style: plain-text subs report real defaults and accept color', async ({ items }) => {
     const fx = items.srtItem;
-    if (!fx) { current.details.push('no plain-text-subtitle item in library - skipped'); return; }
+    if (!fx) return skip('no plain-text-subtitle item in library');
     await playAndWait(fx.Id);
     await sleep(600);
     const tl = await mpvCmd('get_property', 'track-list');
@@ -1105,6 +1141,113 @@ t(32, 'unwatched-quit: saves no position anywhere, item reset to unwatched', asy
     check(!saved[fx.Id], `local position still saved for ${fx.Id}`);
 });
 
+t(35, 'apiKey: media URLs carry the configured key; token fallback; logs redacted', async ({ items }) => {
+    // #386/#388: mediaApiKey() must prefer CONFIG.apiKey over the access token,
+    // and whatever ends up in the URL must be redacted to *** in shim logs.
+    const created = await post('/Auth/Keys', null, { app: `${TEST_NAME}-urlcheck` });
+    if (created.status === 401 || created.status === 403) return skip('admin required to create API keys');
+    check(created.status < 400, `API key creation rejected (${created.status})`);
+    const list = await get('/Auth/Keys');
+    const key = (list.data.Items || []).find(k => k.AppName === `${TEST_NAME}-urlcheck`);
+    check(key, 'created API key not listed');
+    try {
+        await stopShim();
+        writeConfig({ apiKey: key.AccessToken });
+        startShim();
+        await waitFor('WebSocket connection established', 30000);
+        await connectIpcWhenReady().catch(() => {});
+        const m = markLog();
+        await playAndWait(items.movie.Id);
+        const p = String(await mpvGet('path'));
+        const masked = p.replace(/ApiKey=[^&]+/, 'ApiKey=***');
+        const shimTok = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', `jellyfin_token_${TEST_ID}.json`), 'utf8')).AccessToken;
+        check(p.includes(`ApiKey=${key.AccessToken}`), `URL must carry the configured apiKey (path=${masked})`);
+        check(!p.includes(`ApiKey=${shimTok}`), 'URL must NOT carry the access token when apiKey is configured');
+        // redaction contract: the raw key must never reach the logs
+        check(!shimOut.includes(key.AccessToken), 'raw apiKey leaked into shim logs');
+        check(shimOut.slice(m).includes('ApiKey=***'), 'stream URL should be logged redacted');
+
+        // fallback branch: no apiKey → the access token goes into the URL
+        await stopShim();
+        writeConfig();
+        startShim();
+        await waitFor('WebSocket connection established', 30000);
+        await connectIpcWhenReady().catch(() => {});
+        await playAndWait(items.movie.Id);
+        const p2 = String(await mpvGet('path'));
+        const shimTok2 = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', `jellyfin_token_${TEST_ID}.json`), 'utf8')).AccessToken;
+        check(p2.includes(`ApiKey=${shimTok2}`), `with no apiKey the URL must carry the token (path=${p2.replace(/ApiKey=[^&]+/, 'ApiKey=***')})`);
+    } finally {
+        await stopShim();
+        writeConfig();
+        startShim();
+        await waitFor('WebSocket connection established', 30000);
+        await connectIpcWhenReady().catch(() => {});
+        // revocation takes the TOKEN string, not the numeric Id (all Ids report 0)
+        await del('/Auth/Keys/' + key.AccessToken);
+    }
+});
+
+t(36, 'revoked token: shim reauthenticates and recovers instead of going silent', async ({ items }) => {
+    // #385: a revoked/invalidated token must trigger reauthenticate() and a
+    // retry — not silently drop reporting until restart.
+    //
+    // How to invalidate a live session token (verified against the server):
+    // DELETE /Auth/Keys/{token} returns 204 but only kills true API keys — a
+    // session token keeps working. A same-device re-login DOES invalidate the
+    // old token (401 afterwards) and kicks the device's sockets — the exact
+    // sequence that stranded the running shim earlier today.
+    const tokFile = path.join(ROOT, 'data', `jellyfin_token_${TEST_ID}.json`);
+    const before = JSON.parse(fs.readFileSync(tokFile, 'utf8')).AccessToken;
+    const m = markLog();
+    const probe = await login(TEST_ID); // invalidate 'before' + kick the sockets
+    // drop the probe's own session row right away so findSession() below can
+    // only match the shim's recovered session
+    await api.post('/Sessions/Logout', {}, { headers: probe.Authorization, validateStatus: () => true });
+    await waitForSince(m, /Token expired, reauthenticating/, 20000, 'reauth log line');
+    await waitForSince(m, /Authentication successful/, 20000, 'reauth completion');
+    await waitForSince(m, /WebSocket connection established/, 20000, 'sockets back up');
+    // and it fully works afterwards: a whole play cycle on the fresh token
+    await playAndWait(items.movie.Id);
+    const after = JSON.parse(fs.readFileSync(tokFile, 'utf8')).AccessToken;
+    check(after && after !== before, 'shim did not save a fresh token after reauth');
+    const ses = await findSession();
+    check(ses, 'session lost after token revocation');
+});
+
+const crashLogBytes = () => { try { return fs.statSync(path.join(ROOT, 'data', 'crash.log')).size; } catch { return 0; } };
+
+t(37, 'shutdown while sockets are mid-handshake: no crash (closeAllWs regression)', async () => {
+    // Regression for a crash seen live (crash.log 2026-10-23T01:58Z): during
+    // SIGTERM shutdown closeAllWs() called removeAllListeners() then close() on
+    // sockets still CONNECTING (a reconnect was in flight while the server was
+    // restarting). ws aborts a pending handshake and emits 'error'
+    // asynchronously (process.nextTick) — past the try/catch, with no listener
+    // left → uncaughtException → crash dialog + crash.log during quit. The
+    // stalled proxy keeps both sockets in CONNECTING to reproduce exactly that.
+    const proxy = startWsProxy(cfg.serverUrl, { stallUpgrades: true });
+    const port = await proxy.listen();
+    const base = new URL(cfg.serverUrl);
+    await stopShim();
+    writeConfig({ serverUrl: `http://127.0.0.1:${port}${base.pathname.replace(/\/$/, '')}` });
+    const crashBefore = crashLogBytes();
+    startShim();
+    await waitFor('Script started correctly', 25000, 'shim up');
+    for (let i = 0; i < 20 && proxy.upgrades.length < 2; i++) await sleep(250);
+    check(proxy.upgrades.length >= 2, `both sockets should be mid-handshake, saw ${proxy.upgrades.length}`);
+    await stopShim(); // SIGTERM → shutdown → closeAllWs on CONNECTING sockets
+    await sleep(1000);
+    check(/Closing application/.test(shimOut), 'clean shutdown message missing');
+    check(!/Uncaught exception/.test(shimOut), 'closeAllWs crashed on a CONNECTING socket');
+    check(crashLogBytes() === crashBefore, 'crash.log grew during shutdown');
+    await proxy.close();
+    // restore the default fixture for whatever runs next
+    writeConfig();
+    startShim();
+    await waitFor('WebSocket connection established', 30000);
+    await connectIpcWhenReady().catch(() => {});
+});
+
 t(23, 'security: token never appears in shim logs', async () => {
     const r = await api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
         headers: { 'Content-Type': 'application/json', Authorization: `MediaBrowser Client="x", Device="x", DeviceId="tokcheck", Version="1.0"` }
@@ -1130,7 +1273,7 @@ t(24, 'shutdown: lock file cleaned, session stops', async () => {
 // Minimal HTTP+WebSocket TCP proxy — lets a test sever ONE shim connection at
 // the TCP level (an RST exactly like the real-world 1006 drops) without
 // touching the other.
-function startWsProxy(target) {
+function startWsProxy(target, { stallUpgrades = false } = {}) {
     const t = new URL(target);
     const isTls = t.protocol === 'https:';
     const upstreamPort = Number(t.port) || (isTls ? 443 : 80);
@@ -1145,6 +1288,14 @@ function startWsProxy(target) {
         req.pipe(p);
     });
     server.on('upgrade', (req, clientSock, head) => {
+        if (stallUpgrades) {
+            // Accept the TCP connection but never answer the handshake: the
+            // client's WebSocket stays CONNECTING indefinitely. Used to
+            // reproduce "close() during a pending handshake" shutdown bugs.
+            clientSock.on('error', () => {});
+            upgrades.push({ dead: false, kill() { this.dead = true; try { clientSock.destroy(); } catch {} } });
+            return;
+        }
         const up = isTls
             ? tls.connect({ host: t.hostname, port: upstreamPort, servername: t.hostname })
             : net.connect(upstreamPort, t.hostname);
@@ -1169,7 +1320,16 @@ function startWsProxy(target) {
     return {
         upgrades,
         listen: () => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port))),
-        close: () => new Promise(r => { try { server.close(() => r()); } catch { r(); } })
+        // Force-destroy every accepted connection first: a stalled upgrade
+        // socket is never read/closed, so it keeps server.close() waiting
+        // forever — and with all handles gone Node exits 0 mid-test (pending
+        // promise, empty loop), silently skipping the rest of the suite.
+        close: () => new Promise(r => {
+            const done = () => r();
+            try { for (const u of upgrades) u.kill(); } catch {}
+            try { server.close(done); } catch { done(); }
+            setTimeout(done, 2000);
+        })
     };
 }
 
@@ -1257,11 +1417,37 @@ t(34, 'presence socket: shim keeps its session through a single-socket kill', as
 });
 
 // ---------- runner ----------
+// If the event loop ever drains before the run completes (a hung await with no
+// live handles — e.g. server.close() waiting on a stalled socket), Node exits
+// 0 with no SUMMARY and silently skips everything left. Never let that pass.
+// Every normal exit below goes through process.exit(), which does NOT emit
+// beforeExit — so reaching this handler is always a bug.
+process.on('beforeExit', () => {
+    console.error('SUITE BUG: event loop drained before the run completed (hung await?). Failing.');
+    process.exit(1);
+});
 async function main() {
     reapStaleTestMpvs();
     writeConfig();
     const loginInfo = await login('e2e-runner');
     authHeaders = loginInfo;
+
+    // The suite plays NextUp items and rewrites UserData (played/position/
+    // favorite) around every test. If a human is watching the same account
+    // concurrently, the restore step fights their marks and the web UI churns
+    // (observed live: watched flags reverting, UserDataChanged storms).
+    if (!process.argv.includes('--force')) {
+        const s = await get('/Sessions');
+        const busy = (s.data || []).filter(x => x.DeviceId !== TEST_ID && x.NowPlayingItem);
+        if (busy.length) {
+            console.error('REFUSING TO RUN: another session is actively playing on this account:');
+            for (const b of busy) console.error(`  - ${b.DeviceName} (${b.DeviceId}) is playing "${b.NowPlayingItem.Name}"`);
+            console.error('The suite plays NextUp items and rewrites UserData; running it now will');
+            console.error('fight the viewer. Wait for them to finish, or re-run with --force.');
+            process.exit(1);
+        }
+    }
+
     const items = await discoverItems();
     // snapshot UserData for every fixture id (incl. auto-advanced episodes) so
     // teardown can put Played/resume/favorite/PlayCount back exactly
@@ -1285,12 +1471,14 @@ async function main() {
     try {
         for (const test of tests) {
             if (ONLY && !ONLY.includes(test.num)) continue;
-            current = { name: `${test.num}. ${test.name}`, ok: true, details: [] };
+            current = { name: `${test.num}. ${test.name}`, ok: true, details: [], skipped: false };
             const t0 = Date.now();
             try {
                 await test.fn({ items });
-                results.push({ ...current, pass: true, ms: Date.now() - t0 });
-                console.log(`✅ PASS  ${current.name}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+                results.push({ ...current, pass: !current.skipped, ms: Date.now() - t0 });
+                console.log(current.skipped
+                    ? `⏭ SKIP  ${current.name}  — ${current.details.join('; ')}`
+                    : `✅ PASS  ${current.name}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
             } catch (e) {
                 results.push({ ...current, pass: false, ms: Date.now() - t0, error: e.message });
                 console.log(`❌ FAIL  ${current.name}  — ${e.message}`);
@@ -1310,13 +1498,23 @@ async function main() {
         await teardown();
     }
 
-    const pass = results.filter(r => r.pass).length;
-    console.log(`\n========== SUMMARY: ${pass}/${results.length} passed ==========`);
-    for (const r of results.filter(r => !r.pass)) {
+    const pass = results.filter(r => r.pass && !r.skipped).length;
+    const skipped = results.filter(r => r.skipped).length;
+    const failed = results.filter(r => !r.pass && !r.skipped).length; // skips are NOT failures
+    console.log(`\n========== SUMMARY: ${pass} passed, ${skipped} skipped, ${failed} failed ==========`);
+    for (const r of results.filter(r => r.skipped)) {
+        console.log(`SKIPPED: ${r.name}\n   ${r.details.join('; ')}`);
+    }
+    for (const r of results.filter(r => !r.pass && !r.skipped)) {
         console.log(`FAILED: ${r.name}\n   ${r.error || r.details.join('; ')}`);
     }
-    process.exit(pass === results.length ? 0 : 1);
+    process.exit(failed ? 1 : 0);
 }
 
 process.on('SIGINT', async () => { console.log('\nSIGINT - cleaning up'); await teardown(); process.exit(130); });
+// shell-tool timeouts and `kill` deliver SIGTERM — without this handler the run
+// dies mid-test and leaves its Played/resume mutations on the server (SIGKILL
+// can't be caught at all, so treat any stray mutations as suspect after a kill)
+process.on('SIGTERM', async () => { console.log('\nSIGTERM - cleaning up'); await teardown(); process.exit(143); });
+process.on('uncaughtException', async (e) => { console.error('UNCAUGHT:', e); await teardown(); process.exit(1); });
 main().catch(async (e) => { console.error('SUITE ERROR:', e); await teardown(); process.exit(1); });
