@@ -544,6 +544,14 @@ mpv emits a phantom `pause=false` ("Playback resumed") **while exiting** — the
 - all playback reports serialize through `chainReport` (`reportChain`) so the server always processes progress before stop — and so a transition's `start(new)` can never overtake `stop(old)`
 - **manual transitions must report start explicitly**: any path that pre-updates `queuePosition`/`currentItemId` before sending `playlist-next`/`playlist-prev`/`playlist-play-index` (playNextEpisode queue-advance / in-season / NextUp, playPreviousEpisode queue path) bypasses the `playlist-pos` handler's transition block — its guard is `newPos !== queuePosition`, already false by the time the event lands. Those paths call `beginPlaybackReporting()`; without it the server hears STOP for the old item and only PROGRESS for the new one (scrobblers miss the start, `playSessionId` goes stale). The `playlist-pos` `.catch` must call it too — reporting must never depend on the info fetch succeeding.
 
+### Completed items leave NO resume position
+
+A finished episode must end `Played=true` with zero `PlaybackPositionTicks`, locally and server-side. Jellyfin's stop handler runs `UpdatePlayState`, which writes `PlaybackPositionTicks` verbatim unless the reported position is past **its** `MaxResumePct` of **its** `RunTimeTicks` — with wrong runtime metadata a 99%-watched episode lands in the resume band, so the stop report re-writes a resume position *after* `markItemAsWatched`'s `MarkPlayed(resetPosition:true)` cleared it: `Played=true + position>0`, which sticks in Continue Watching forever (jellyfin/jellyfin#17102). Defenses (all four needed):
+- `reportPlaybackStop` reports `PositionTicks: 0` whenever `isItemCompleted()` — `UpdatePlayState(0)` writes position 0 unconditionally
+- `isItemCompleted()` uses `markedWatched` OR 90% of mpv's **measured** `currentDuration` (fallback `itemRuntime`) — metadata is not the completion signal, the played file is
+- `eof-reached` marks watched + reports stop for **every** finished file, not just the last in the playlist (the `playlist-pos` transition thresholds now call `isItemCompleted` too)
+- no `savePlaybackPosition` for completed items — the mpv close handler used to re-save locally right after the watched-mark cleared the entry
+
 ### Stale-async guards (generation tokens)
 
 Any async continuation that outlives the file or command it was started for must be generation-guarded, or it mutates state for the wrong item:

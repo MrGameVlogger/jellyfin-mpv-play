@@ -1358,8 +1358,7 @@ async function handleMessage(sock, msg) {
                 // graceful shutdown that can take seconds, and the user expects
                 // the watched state immediately. The close handler keeps its own
                 // check as backstop (the markedWatched set prevents double posts).
-                const runtime = currentEpisodeInfo?.itemRuntime || 0;
-                if (!isUnwatchedQuit && runtime > 0 && currentPositionSeconds >= runtime * 0.9) {
+                if (!isUnwatchedQuit && isItemCompleted(currentItemId, currentPositionSeconds)) {
                     markItemAsWatched(currentItemId);
                 }
                 reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
@@ -1861,9 +1860,7 @@ async function loadNewQueue(itemId, startTicks) {
     invalidateFileGeneration(); // stale file continuations die with this navigation
     stopProgressPoll();
     if (currentItemId && !isReportingStop) {
-        const runtime = currentEpisodeInfo?.itemRuntime || 0;
-        const completionThreshold = 0.9;
-        if (runtime > 0 && currentPositionSeconds >= runtime * completionThreshold) {
+        if (isItemCompleted(currentItemId, currentPositionSeconds)) {
             markItemAsWatched(currentItemId);
         }
         reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
@@ -2128,7 +2125,11 @@ async function playMedia(itemId, startTicks) {
                 }
                 chainReport(() => markItemAsUnwatched(unwatchedId));
             } else {
-                if (currentItemId && currentPositionSeconds > 0) {
+                // A completed item must leave NO resume position anywhere: the
+                // markItemAsWatched below already cleared the local entry, and
+                // re-saving here used to put it right back.
+                const completed = isItemCompleted(currentItemId, currentPositionSeconds);
+                if (currentItemId && currentPositionSeconds > 0 && !completed) {
                     const positionTicks = Math.round(currentPositionSeconds * 10000000);
                     savePlaybackPosition(currentItemId, positionTicks);
                 }
@@ -2139,12 +2140,8 @@ async function playMedia(itemId, startTicks) {
             // Mark watched independently of the stop-report guard: the Stop command
             // reports the stop first (isReportingStop=true) and then kills mpv —
             // tying these together meant stopping near the end never marked watched.
-            if (currentItemId && !isUnwatchedQuit) {
-                const runtime = currentEpisodeInfo?.itemRuntime || 0;
-                const completionThreshold = 0.9;
-                if (runtime > 0 && currentPositionSeconds >= runtime * completionThreshold) {
-                    markItemAsWatched(currentItemId);
-                }
+            if (currentItemId && !isUnwatchedQuit && isItemCompleted(currentItemId, currentPositionSeconds)) {
+                markItemAsWatched(currentItemId);
             }
             isUnwatchedQuit = false;
             mpvProcess = null;
@@ -2361,7 +2358,10 @@ async function markItemAsWatched(itemId) {
     if (markedWatched.has(itemId)) return true;
     markedWatched.add(itemId);
     try {
-        await apiPost(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`, {});
+        // Serialized on the shared report chain so MarkPlayed (Played=true +
+        // position reset) is ordered against the stop report's UserData write
+        // instead of racing it.
+        await chainReport(() => apiPost(`${CONFIG.serverUrl}/Users/${userId}/PlayedItems/${itemId}`, {}));
         log('info', 'report', `✅ Item marked as watched in Jellyfin (${itemId})`);
 
         const positions = loadPlaybackPositions();
@@ -2595,6 +2595,11 @@ function handleMpvEvent(event) {
 
     if (event.event === 'property-change' && event.name === 'pause' && typeof event.data === 'boolean') {
         isMpvPaused = event.data;
+        // mpv emits a phantom pause=false ("Playback resumed") while exiting —
+        // once a stop is in flight/reported that is exit noise, not a real
+        // resume. Reporting it would re-write a resume position for an item
+        // that just completed, and the log line lies about what happened.
+        if (isStoppingPlayback || isReportingStop) return;
         log('info', 'mpv', event.data ? '⏸️ Playback paused' : '▶️ Playback resumed');
         if (currentItemId) reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * 10000000));
         return;
@@ -2697,10 +2702,9 @@ function handleMpvEvent(event) {
 
                 const prevItemId = currentItemId;
                 const prevPos = currentPositionSeconds;
-                const prevRuntime = currentEpisodeInfo?.itemRuntime || 0;
 
                 if (prevItemId && prevItemId !== entryId) {
-                    if (prevRuntime > 0 && prevPos >= prevRuntime * 0.9) {
+                    if (isItemCompleted(prevItemId, prevPos)) {
                         markItemAsWatched(prevItemId);
                     }
                     reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
@@ -2747,10 +2751,16 @@ function handleMpvEvent(event) {
         const posStr = currentPositionSeconds ? currentPositionSeconds.toFixed(1) : '?';
         const durStr = currentDuration ? currentDuration.toFixed(1) : '?';
         log('info', 'mpv', `End of file reached — itemId=${currentItemId || 'none'}, pos=${posStr}s/${durStr}s, queue=${queuePosition}/${playQueue.length - 1}, isLast=${isLastInPlaylist}`);
-        if (currentItemId && !isPlayingNext && isLastInPlaylist) {
-            log('info', 'queue', 'EOF on last item, checking for auto-close');
+        if (currentItemId && !isPlayingNext) {
+            // mpv played this file to its end: the episode COMPLETED, whatever
+            // Jellyfin's (possibly wrong) runtime metadata thinks. Mark watched
+            // and stop at 0 ticks — reportPlaybackStop sends 0 for completed
+            // items so no resume position survives the UserData write.
             markItemAsWatched(currentItemId);
             reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        }
+        if (currentItemId && !isPlayingNext && isLastInPlaylist) {
+            log('info', 'queue', 'EOF on last item, checking for auto-close');
             playNextEpisode();
         }
         return;
@@ -2801,9 +2811,8 @@ async function playNextEpisode() {
     if (playQueue.length > 0 && queuePosition < playQueue.length - 1) {
         const prevItemId = currentItemId;
         const prevPos = currentPositionSeconds;
-        const prevRuntime = currentEpisodeInfo?.itemRuntime || 0;
         if (prevItemId) {
-            if (prevRuntime > 0 && prevPos >= prevRuntime * 0.9) {
+            if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
             reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
@@ -2860,9 +2869,8 @@ async function playNextEpisode() {
         // Mark current episode as watched before advancing
         const prevItemId = currentItemId;
         const prevPos = currentPositionSeconds;
-        const prevRuntime = currentEpisodeInfo?.itemRuntime || 0;
         if (prevItemId) {
-            if (prevRuntime > 0 && prevPos >= prevRuntime * 0.9) {
+            if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
             reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
@@ -2891,9 +2899,8 @@ async function playNextEpisode() {
         // Mark current episode as watched BEFORE querying NextUp to prevent race condition
         const prevItemId2 = currentItemId;
         const prevPos2 = currentPositionSeconds;
-        const prevRuntime2 = currentEpisodeInfo?.itemRuntime || 0;
         if (prevItemId2) {
-            if (prevRuntime2 > 0 && prevPos2 >= prevRuntime2 * 0.9) {
+            if (isItemCompleted(prevItemId2, prevPos2)) {
                 let marked = await markItemAsWatched(prevItemId2);
                 if (!marked) {
                     log('warn', 'queue', '⚠️ Failed to mark episode as watched, retrying...');
@@ -3001,9 +3008,8 @@ async function playPreviousEpisode() {
         invalidateFileGeneration(); // stale file continuations die with this navigation
         const prevItemId = currentItemId;
         const prevPos = currentPositionSeconds;
-        const prevRuntime = currentEpisodeInfo?.itemRuntime || 0;
         if (prevItemId) {
-            if (prevRuntime > 0 && prevPos >= prevRuntime * 0.9) {
+            if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
             reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
@@ -3124,7 +3130,7 @@ function startProgressReporting(itemId) {
         }
 
         const currentTicks = Math.round(currentPositionSeconds * 10000000);
-        if (currentPositionSeconds > 10) {
+        if (currentPositionSeconds > 10 && !isStoppingPlayback && !isItemCompleted(currentItemId, currentPositionSeconds)) {
             savePlaybackPosition(currentItemId, currentTicks);
         }
         // Report progress to server to keep session alive
@@ -3134,6 +3140,7 @@ function startProgressReporting(itemId) {
 
 function reportPlaybackProgress(itemId, positionTicks) {
     if (isStoppingPlayback) return; // never let a progress report resurrect a stopped session
+    if (itemId && markedWatched.has(itemId)) return; // completed items never get progress writes
     
     const data = {
         ItemId: itemId,
@@ -3164,6 +3171,18 @@ function reportPlaybackProgress(itemId, positionTicks) {
     );
 }
 
+// Metadata-independent completion check. Jellyfin's RunTimeTicks can be wrong
+// (an overstated runtime once kept MaxResumePct from firing server-side, leaving
+// a finished episode with a resume position next to Played=true), so mpv's
+// measured duration plus our own watched mark are the ground truth: a completed
+// item must end as watched with NO resume position, anywhere.
+function isItemCompleted(itemId, positionSeconds) {
+    if (!itemId) return false;
+    if (markedWatched.has(itemId)) return true;
+    const runtime = currentDuration > 0 ? currentDuration : (currentEpisodeInfo?.itemRuntime || 0);
+    return runtime > 0 && positionSeconds >= runtime * 0.9;
+}
+
 function reportPlaybackStop(itemId, positionTicks) {
     if (!itemId || isReportingStop) {
         return Promise.resolve();
@@ -3172,14 +3191,22 @@ function reportPlaybackStop(itemId, positionTicks) {
     isReportingStop = true;
     isStoppingPlayback = true;
     
+    // A completed item reports position 0: Jellyfin's stop handler writes
+    // PlaybackPositionTicks verbatim unless the position is past ITS MaxResumePct
+    // of ITS RunTimeTicks — wrong metadata turns 99% into "78%" and the resume
+    // point survives. Sending 0 makes UpdatePlayState write position 0 no
+    // matter what; markItemAsWatched's MarkPlayed(resetPosition:true) agrees.
+    const completed = isItemCompleted(itemId, positionTicks / 10000000);
+    const reportedTicks = completed ? 0 : positionTicks;
+
     const data = {
         ItemId: itemId,
         MediaSourceId: itemId,
-        PositionTicks: positionTicks,
+        PositionTicks: reportedTicks,
         PlaySessionId: playSessionId
     };
 
-    log('info', 'report', `📡 Reporting playback stop (position: ${(positionTicks / 10000000).toFixed(2)}s)...`);
+    log('info', 'report', `📡 Reporting playback stop (position: ${(reportedTicks / 10000000).toFixed(2)}s${completed ? ', completed' : ''})...`);
     
     // Serialized on the shared chain: the phantom-resume progress POST is
     // enqueued before the close handler's stop, so it lands first — and any
@@ -3539,7 +3566,7 @@ function shutdown(signal) {
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
     
     const doUnwatched = !!(currentItemId && isUnwatchedQuit);
-    if (!doUnwatched && currentItemId && currentPositionSeconds > 0) {
+    if (!doUnwatched && currentItemId && currentPositionSeconds > 0 && !isItemCompleted(currentItemId, currentPositionSeconds)) {
         savePlaybackPosition(currentItemId, Math.round(currentPositionSeconds * 10000000));
     }
 
