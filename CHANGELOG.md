@@ -18,6 +18,24 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.16.0
+
+### Features
+- **Stable API key for media URLs handed to mpv** — new `apiKey` option (config.js / macOS Settings panel). When set (Dashboard → API Keys), the stream URLs mpv receives carry that key instead of the session access token, so a mid-session token invalidation can no longer kill the rest of the queue. Media URLs in logs are redacted to `ApiKey=***`. With no key configured the previous behavior (session token) is unchanged.
+
+### Bug Fixes
+- **Completed episodes end watched with NO resume position anywhere** — finishing an episode (EOF on the last file of a season, auto-close) used to leave Jellyfin with `Played=true` AND a resume position (stuck in Continue Watching), plus a stray local resume entry and a phantom "Playback resumed" log after the show ended. Jellyfin's stop handler writes `PlaybackPositionTicks` verbatim unless the position is past its `MaxResumePct` of its `RunTimeTicks` — wrong runtime metadata turns 99%-watched into "78%" and the resume point survives next to `Played=true`. Completed items now report the stop at position 0 (written as 0 regardless of metadata), completion is judged by mpv's measured duration instead of Jellyfin's metadata, `eof-reached` marks watched for every finished file (not just the last in the queue), and no local resume position is saved for completed items.
+- **Recover from a revoked token instead of silently going silent** — a 401 on any API call now triggers a reauthenticate-and-retry instead of leaving playback reporting dead until restart.
+- **No crash dialog when quitting with a WebSocket reconnect in flight** — closing the app while a reconnect was mid-handshake emitted an async ws `'error'` past every listener → uncaughtException + crash dialog + crash.log during quit.
+
+### Security
+- **mpv command log args are fully redacted** — queue M3U and `sub-add` URLs embed the `ApiKey`; every logged command arg now passes through `redact()` (closes the remaining CodeQL `js/clear-text-logging` alerts).
+
+### Internal
+- **e2e suite hardening** — fixture-dependent skips are now reported as SKIP (never PASS), fixture discovery prefers an episode with a following episode, and three new tests cover the apiKey URL/redaction contract (35), revoked-token recovery (36), the quit-with-reconnect crash (37), and the completed-episode resume contract (38). The suite refuses to start while another session is actively playing (`--force` overrides) — running it alongside a live viewer fights their watch marks.
+
+---
+
 ## v1.15.0
 
 ### Features
