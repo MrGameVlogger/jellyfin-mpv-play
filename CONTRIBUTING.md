@@ -158,6 +158,14 @@ The native macOS menubar app (`macapp/`) spawns the Node.js shim and parses its 
 2. **Create a branch** from `main`
 3. **Make your changes** — follow the code style above
 4. **Test** on your platform (macOS, Windows, or Linux)
+   - `npm test` — fast contract/quality checks (run always)
+   - `npm run test:e2e` — live end-to-end suite against your own Jellyfin
+     server + real mpv (opt-in, slow). **Never run it as your real Jellyfin
+     user**: completed test playback reports `playedToCompletion`, which
+     scrobbler plugins (e.g. jellyfin-ani-sync) sync to AniList/MAL for every
+     user configured in the plugin. The suite auto-provisions a dedicated
+     throwaway user (`jellyfin-mpv-play-e2e`) for exactly this reason — leave
+     that user out of any scrobbler plugin's config.
 5. **Submit a Pull Request** — fill out the PR template
 
 ## Pull Request Guidelines
