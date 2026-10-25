@@ -1289,6 +1289,12 @@ t(38, 'completed item ends watched with NO resume position (server or local)', a
         const eofAt = shimOut.indexOf('Reporting playback stop');
         check(eofAt >= 0, 'stop report not logged');
         check(!/Playback resumed/.test(shimOut.slice(eofAt)), 'phantom "Playback resumed" logged after the stop report');
+
+        // plugin contract: the completed stop must be reported at/over the item's
+        // RunTimeTicks (logged as ", completed") so Jellyfin's UpdatePlayState
+        // sets playedToCompletion on the PlaybackStopped event — scrobblers
+        // (jellyfin-ani-sync etc.) gate their entire sync on that flag
+        check(/Reporting playback stop \(position: [\d.]+s, completed\)/.test(shimOut), 'completed stop not reported at/over RunTimeTicks (playedToCompletion would stay false)');
     } finally {
         await stopShim();
         writeConfig();

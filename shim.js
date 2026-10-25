@@ -3191,13 +3191,19 @@ function reportPlaybackStop(itemId, positionTicks) {
     isReportingStop = true;
     isStoppingPlayback = true;
     
-    // A completed item reports position 0: Jellyfin's stop handler writes
-    // PlaybackPositionTicks verbatim unless the position is past ITS MaxResumePct
-    // of ITS RunTimeTicks — wrong metadata turns 99% into "78%" and the resume
-    // point survives. Sending 0 makes UpdatePlayState write position 0 no
-    // matter what; markItemAsWatched's MarkPlayed(resetPosition:true) agrees.
+    // A completed item reports at the item's RunTimeTicks (never 0): Jellyfin's
+    // UpdatePlayState marks completed when the reported position is past
+    // MaxResumePct of ITS RunTimeTicks OR within 1s of it — reporting the
+    // runtime itself satisfies that no matter how wrong the metadata is, and
+    // is the only way the server sets playedToCompletion=true on the
+    // PlaybackStopped event. Scrobblers (jellyfin-ani-sync et al) gate their
+    // entire sync on that flag, so sending 0 (which skips every branch of
+    // UpdatePlayState) silently disabled them. The server still writes
+    // PlaybackPositionTicks=0 for a completed stop, and markItemAsWatched's
+    // MarkPlayed(resetPosition:true) lands after as the final word.
     const completed = isItemCompleted(itemId, positionTicks / 10000000);
-    const reportedTicks = completed ? 0 : positionTicks;
+    const itemRuntimeTicks = Math.round((currentEpisodeInfo?.itemRuntime || 0) * 10000000);
+    const reportedTicks = completed ? Math.max(positionTicks, itemRuntimeTicks) : positionTicks;
 
     const data = {
         ItemId: itemId,
