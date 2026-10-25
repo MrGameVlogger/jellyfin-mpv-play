@@ -18,13 +18,20 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.16.1
+
+### Bug Fixes
+- **Completed episodes now sync to scrobblers again (AniList/MAL via jellyfin-ani-sync etc.)** — v1.16.0 reported the stop for a completed item at position 0. Jellyfin's `UpdatePlayState` guards every branch behind `positionTicks > 0`, so a 0 report skipped them all and `playedToCompletion` stayed false on the `PlaybackStopped` event — scrobblers gate their entire sync on that flag, so finished episodes silently never synced. Completed stops now report the item's own stated `RunTimeTicks` (satisfies Jellyfin's `pctIn > MaxResumePct || positionTicks >= RunTimeTicks - 1s` rule however wrong the metadata is), so Jellyfin itself writes `Played=true` + zero position **and** sets `playedToCompletion` — the same wire shape jellyfin-web produces. The v1.16.0 resume-position fix is unchanged and still holds.
+
+---
+
 ## v1.16.0
 
 ### Features
 - **Stable API key for media URLs handed to mpv** — new `apiKey` option (config.js / macOS Settings panel). When set (Dashboard → API Keys), the stream URLs mpv receives carry that key instead of the session access token, so a mid-session token invalidation can no longer kill the rest of the queue. Media URLs in logs are redacted to `ApiKey=***`. With no key configured the previous behavior (session token) is unchanged.
 
 ### Bug Fixes
-- **Completed episodes end watched with NO resume position anywhere** — finishing an episode (EOF on the last file of a season, auto-close) used to leave Jellyfin with `Played=true` AND a resume position (stuck in Continue Watching), plus a stray local resume entry and a phantom "Playback resumed" log after the show ended. Jellyfin's stop handler writes `PlaybackPositionTicks` verbatim unless the position is past its `MaxResumePct` of its `RunTimeTicks` — wrong runtime metadata turns 99%-watched into "78%" and the resume point survives next to `Played=true`. Completed items now report the stop at position 0 (written as 0 regardless of metadata), completion is judged by mpv's measured duration instead of Jellyfin's metadata, `eof-reached` marks watched for every finished file (not just the last in the queue), and no local resume position is saved for completed items.
+- **Completed episodes end watched with NO resume position anywhere** — finishing an episode (EOF on the last file of a season, auto-close) used to leave Jellyfin with `Played=true` AND a resume position (stuck in Continue Watching), plus a stray local resume entry and a phantom "Playback resumed" log after the show ended. Jellyfin's stop handler writes `PlaybackPositionTicks` verbatim unless the position is past its `MaxResumePct` of its `RunTimeTicks` — wrong runtime metadata turns 99%-watched into "78%" and the resume point survives next to `Played=true`. Completion is now judged by mpv's measured duration instead of Jellyfin's metadata, `eof-reached` marks watched for every finished file (not just the last in the queue), and no local resume position is saved for completed items. (The stop report's position shape was corrected in v1.16.1.)
 - **Recover from a revoked token instead of silently going silent** — a 401 on any API call now triggers a reauthenticate-and-retry instead of leaving playback reporting dead until restart.
 - **No crash dialog when quitting with a WebSocket reconnect in flight** — closing the app while a reconnect was mid-handshake emitted an async ws `'error'` past every listener → uncaughtException + crash dialog + crash.log during quit.
 
