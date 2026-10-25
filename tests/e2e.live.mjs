@@ -7,9 +7,20 @@
 //
 // The suite plays NextUp items and rewrites UserData (played/position/
 // favorite) around every test. It REFUSES to run while another session is
-// actively playing on the account (--force overrides) — running it alongside a
-// live viewer fights their watch marks and floods their web UI with
-// UserDataChanged churn.
+// actively playing on the server (--force overrides) — concurrent runs compete
+// for remote bandwidth and transcode slots on a live viewer's stream.
+//
+// CRITICAL — scrobble isolation: the suite NEVER runs as the real account. It
+// auto-provisions a dedicated Jellyfin user (`jellyfin-mpv-play-e2e`, override
+// with E2E_USERNAME/E2E_PASSWORD) and runs both the shim and the test API
+// calls as that user. Completed items report PlaybackStopped with
+// playedToCompletion=true, and jellyfin-ani-sync syncs exactly those events to
+// AniList/MAL for every user listed in its UserConfig (plus TogglePlayed saves
+// when watchedTickboxUpdatesProvider is on) — running the suite as a
+// scrobbling user leaks test watches to the tracker (observed live
+// 2026-10-24). A user absent from the plugin's UserConfig is skipped by every
+// sync path, so the test user must never be added there. A preflight check
+// refuses to run if it ever shows up in that config.
 //
 // The suite runs headless (vo=null/ao=null via mpvFlags) on an isolated session
 // (own deviceId + own IPC socket) so it never touches a production device or
@@ -17,6 +28,7 @@
 // position, favorite, PlayCount, SyncPlay groups) and locally (tokens, logs,
 // locks) is snapshotted and restored/removed in teardown().
 import { spawn, execSync } from 'child_process';
+import crypto from 'crypto';
 import net from 'net';
 import http from 'http';
 import https from 'https';
@@ -56,14 +68,27 @@ function near(a, b, tol, msg) { check(Math.abs(a - b) <= tol, `${msg} (got ${a},
 function skip(msg) { current.skipped = true; current.details.push(msg); }
 
 // ---------- Jellyfin API ----------
+// Everything the suite plays runs as `testUser`, never as cfg.username — see
+// the scrobble isolation note at the top. cfg.username only logs in for admin
+// work (test-user provisioning, /Auth/Keys in test 35, cross-user busy check).
+const E2E_USERNAME = process.env.E2E_USERNAME || 'jellyfin-mpv-play-e2e';
+// persistent across runs (kept by teardown — a rerun must not reshuffle the
+// password); gitignored like the rest of data/
+const E2E_USER_FILE = path.join(ROOT, 'data', 'e2e-test-user.json');
+let testUser = null;     // { username, password } — the identity the shim runs under
+let adminHeaders = null; // cfg.username session, when available
 const api = axios.create({ baseURL: cfg.serverUrl, timeout: 15000 });
 let authHeaders;
-async function login(deviceId) {
-    const r = await netRetry(() => api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
+async function loginAs(username, password, deviceId) {
+    const r = await netRetry(() => api.post('/Users/AuthenticateByName', { Username: username, Pw: password }, {
         headers: { 'Content-Type': 'application/json', Authorization: `MediaBrowser Client="${TEST_NAME}", Device="${TEST_NAME}", DeviceId="${deviceId}", Version="1.0.0"` }
     }));
     return { Authorization: `MediaBrowser Token="${r.data.AccessToken}", Client="${TEST_NAME}", Device="${TEST_NAME}", DeviceId="${deviceId}", Version="1.0.0"`, userId: r.data.User.Id };
 }
+// login() MUST match the shim's user+device: test 36's same-device re-login
+// only invalidates the shim's token when both line up
+const login = (deviceId) => loginAs(testUser.username, testUser.password, deviceId);
+const loginAdmin = (deviceId = 'e2e-admin') => loginAs(cfg.username, cfg.password, deviceId);
 const netRetry = async (fn) => {
     try { return await fn(); } catch (e) {
         // transient network blips are common against a remote server (seen:
@@ -79,6 +104,11 @@ const netRetry = async (fn) => {
 const get = (url, params) => netRetry(() => api.get(url, { headers: authHeaders, params, paramsSerializer: { indexes: null }, validateStatus: () => true }));
 const post = (url, body, params) => netRetry(() => api.post(url, body ?? {}, { headers: authHeaders, params, paramsSerializer: { indexes: null }, validateStatus: () => true }));
 const del = (url) => api.delete(url, { headers: authHeaders, validateStatus: () => true });
+// admin-scoped variants (cfg.username) — used ONLY where the test user cannot
+// reach: user provisioning, /Auth/Keys, and the cross-user busy check
+const aget = (url, params) => netRetry(() => api.get(url, { headers: adminHeaders, params, paramsSerializer: { indexes: null }, validateStatus: () => true }));
+const apost = (url, body, params) => netRetry(() => api.post(url, body ?? {}, { headers: adminHeaders, params, paramsSerializer: { indexes: null }, validateStatus: () => true }));
+const adel = (url) => api.delete(url, { headers: adminHeaders, validateStatus: () => true });
 
 async function findSession() {
     // The server drops a session from /Sessions while its WebSocket is down
@@ -194,6 +224,7 @@ async function teardown() {
         const dayAgo = Date.now() - 24 * 3600 * 1000;
         for (const f of fs.readdirSync(path.join(ROOT, 'data'))) {
             if (!/e2e/i.test(f)) continue;
+            if (f === path.basename(E2E_USER_FILE)) continue; // persistent test-user creds, not a run artifact
             const fp = path.join(ROOT, 'data', f);
             try { if (fs.statSync(fp).mtimeMs < dayAgo) fs.unlinkSync(fp); } catch {}
         }
@@ -276,7 +307,8 @@ async function playAndWait(itemId, opts) {
     // transition can emit its own "File loaded by MPV" after our mark.
     await waitForSince(m, 'Play command data', 15000);
     const m2 = markLog();
-    await waitForSince(m2, 'File loaded by MPV', 40000);
+    // 60s: remote streams over slow links take a while to start buffering
+    await waitForSince(m2, 'File loaded by MPV', 60000);
     await connectIpcWhenReady();
     await waitForMpvPath(itemId);
     await sleep(500);
@@ -333,6 +365,20 @@ function mpvCmd(command, ...args) {
 }
 const mpvGet = (p) => mpvCmd('get_property', p);
 const mpvSet = (p, v) => mpvCmd('set_property', p, v);
+// Remote Playstate/GeneralCommands traverse the Jellyfin server before the
+// shim sees them — fixed sleeps after playstate()/generalCmd() race that hop
+// and flake when the network is slow (seen live: mute/repeat assertions read
+// stale mpv state). Poll the LOCAL property until the effect lands instead.
+async function waitMpvGet(prop, pred, timeoutMs = 5000) {
+    const t0 = Date.now();
+    let last;
+    while (Date.now() - t0 < timeoutMs) {
+        last = await mpvGet(prop);
+        if (pred(last)) return last;
+        await sleep(150);
+    }
+    return last;
+}
 // NOTE: mpv's `filename` property is only the last path component (for stream
 // URLs that is "stream?static=true&ApiKey=..."), so identity checks must use `path`.
 function itemIdOf(p) {
@@ -378,8 +424,8 @@ function writeConfig({ autoClose = false, headless = true, extraMpvFlags = [], s
         .map(f => `'${jsStr(f)}'`).join(', ');
     fs.writeFileSync(TMP_CONFIG, `module.exports = {
     serverUrl: '${jsStr(serverUrl)}',
-    username: '${jsStr(cfg.username)}',
-    password: '${jsStr(cfg.password)}',
+    username: '${jsStr(testUser.username)}',
+    password: '${jsStr(testUser.password)}',
     apiKey: '${jsStr(apiKey)}',
     mpvPath: '${jsStr(cfg.mpvPath)}',
     deviceName: '${TEST_NAME}',
@@ -420,27 +466,27 @@ async function discoverItems() {
     // Prefer one with a FOLLOWING episode in the season: tests 18/19 (next-up,
     // auto-advance) exercise seasonList[seasonIndex + 1] and were silently
     // skipping whenever discovery happened to pick the season's last episode.
-    const nextUp = await get('/Shows/NextUp', { userId: authHeaders.userId, limit: 5 });
-    let fallback = null;
-    for (const ep of nextUp.data.Items || []) {
-        const full = await get(`/Users/${authHeaders.userId}/Items/${ep.Id}`, { fields: 'MediaStreams,RunTimeTicks,UserData' });
-        const segs = await get(`/MediaSegments/${ep.Id}`, { includeSegmentTypes: ['Intro', 'Outro'] });
-        const season = await get(`/Shows/${full.data.SeriesId}/Episodes`, { seasonId: full.data.SeasonId, userId: authHeaders.userId, fields: 'IndexNumber,RunTimeTicks' });
-        const list = (season.data.Items || []).sort((a, b) => a.IndexNumber - b.IndexNumber);
-        const idx = list.findIndex(e => e.Id === ep.Id);
-        if (idx >= 0 && list.length >= 2 && list.every(e => e.ParentIndexNumber > 0)) {
-            const cand = { full: full.data, segs: segs.data.Items || [], list, idx };
-            if (idx < list.length - 1) {
-                items.episode = { ...full.data, seasonList: list, seasonIndex: idx, segments: cand.segs };
-                // Same id set the shim's expansion uses; specials-free so a shuffled
-                // first item cannot trigger the season-0 NextUp redirect.
-                items.shuffleSeason = list;
-                break;
+    const considerEpisodes = async (cands) => {
+        let fallback = null;
+        for (const ep of cands) {
+            const full = await get(`/Users/${authHeaders.userId}/Items/${ep.Id}`, { fields: 'MediaStreams,RunTimeTicks,UserData' });
+            const segs = await get(`/MediaSegments/${ep.Id}`, { includeSegmentTypes: ['Intro', 'Outro'] });
+            const season = await get(`/Shows/${full.data.SeriesId}/Episodes`, { seasonId: full.data.SeasonId, userId: authHeaders.userId, fields: 'IndexNumber,RunTimeTicks' });
+            const list = (season.data.Items || []).sort((a, b) => a.IndexNumber - b.IndexNumber);
+            const idx = list.findIndex(e => e.Id === ep.Id);
+            if (idx >= 0 && list.length >= 2 && list.every(e => e.ParentIndexNumber > 0)) {
+                const cand = { full: full.data, segs: segs.data.Items || [], list, idx };
+                if (idx < list.length - 1) {
+                    items.episode = { ...full.data, seasonList: list, seasonIndex: idx, segments: cand.segs };
+                    // Same id set the shim's expansion uses; specials-free so a shuffled
+                    // first item cannot trigger the season-0 NextUp redirect.
+                    items.shuffleSeason = list;
+                    return;
+                }
+                if (!fallback) fallback = cand;
             }
-            if (!fallback) fallback = cand;
         }
-    }
-    if (!items.episode && fallback) {
+        if (!fallback) return;
         // NextUp can point at a season's last episode (e.g. after earlier runs
         // marked the middle ones played). The fixture only needs SOME episode
         // with a follower — step one back within the same season.
@@ -453,8 +499,38 @@ async function discoverItems() {
         }
         items.episode = { ...f.full, seasonList: f.list, seasonIndex: f.idx, segments: f.segs };
         items.shuffleSeason = f.list;
+    };
+
+    const nextUp = await get('/Shows/NextUp', { userId: authHeaders.userId, limit: 5 });
+    await considerEpisodes(nextUp.data.Items || []);
+    if (!items.episode) {
+        // A fresh user (like the e2e test user) has NO NextUp at all — Jellyfin
+        // only continues started series. Scan series for a specials-free season
+        // with 2+ episodes and take one with a follower (and a predecessor when
+        // the season has room) so the next/prev tests get real coverage.
+        const allSeries = await get(`/Users/${authHeaders.userId}/Items`, { IncludeItemTypes: 'Series', Limit: 50 });
+        for (const s of allSeries.data.Items || []) {
+            const eps = await get(`/Shows/${s.Id}/Episodes`, { userId: authHeaders.userId, fields: 'IndexNumber,ParentIndexNumber,SeasonId' });
+            const bySeason = new Map();
+            for (const e of eps.data.Items || []) {
+                if (!(e.ParentIndexNumber > 0)) continue;
+                if (!bySeason.has(e.SeasonId)) bySeason.set(e.SeasonId, []);
+                bySeason.get(e.SeasonId).push(e);
+            }
+            const cands = [];
+            for (const [seasonId, list] of bySeason) {
+                list.sort((a, b) => a.IndexNumber - b.IndexNumber);
+                if (list.length < 2) continue;
+                const idx = list.length >= 3 ? 1 : 0;
+                cands.push({ Id: list[idx].Id, SeriesId: s.Id, SeasonId: seasonId });
+            }
+            if (cands.length) {
+                await considerEpisodes(cands);
+                if (items.episode) break;
+            }
+        }
     }
-    check(items.episode, 'no NextUp episode with a multi-episode season found');
+    check(items.episode, 'no episode with a multi-episode season found (NextUp empty and no usable series)');
 
     // a series whose episode list mixes specials and regular episodes — used to
     // pin the "series play starts past specials, explicit special plays itself" rule
@@ -540,28 +616,30 @@ t(4, 'Playstate seek/rewind/fastforward', async () => {
 
 t(5, 'Volume up/down/set and mute/unmute/toggle', async () => {
     await mpvSet('volume', 50); await sleep(300);
-    await generalCmd('VolumeUp'); await sleep(500);
-    near(await mpvGet('volume'), 55, 2, 'VolumeUp +5');
-    await generalCmd('VolumeDown'); await sleep(500);
-    near(await mpvGet('volume'), 50, 2, 'VolumeDown -5');
-    await generalCmd('SetVolume', { Volume: 33 }); await sleep(500);
-    near(await mpvGet('volume'), 33, 2, 'SetVolume 33');
-    await generalCmd('Mute'); await sleep(400);
-    eq(await mpvGet('mute'), true, 'Mute');
-    await generalCmd('Unmute'); await sleep(400);
-    eq(await mpvGet('mute'), false, 'Unmute');
-    await generalCmd('ToggleMute'); await sleep(400);
-    eq(await mpvGet('mute'), true, 'ToggleMute');
-    await generalCmd('ToggleMute'); await sleep(300);
+    await generalCmd('VolumeUp');
+    near(await waitMpvGet('volume', v => Math.abs(v - 55) <= 2), 55, 2, 'VolumeUp +5');
+    await generalCmd('VolumeDown');
+    near(await waitMpvGet('volume', v => Math.abs(v - 50) <= 2), 50, 2, 'VolumeDown -5');
+    await generalCmd('SetVolume', { Volume: 33 });
+    near(await waitMpvGet('volume', v => Math.abs(v - 33) <= 2), 33, 2, 'SetVolume 33');
+    await generalCmd('Mute');
+    eq(await waitMpvGet('mute', v => v === true), true, 'Mute');
+    await generalCmd('Unmute');
+    eq(await waitMpvGet('mute', v => v === false), false, 'Unmute');
+    await generalCmd('ToggleMute');
+    eq(await waitMpvGet('mute', v => v === true), true, 'ToggleMute');
+    await generalCmd('ToggleMute');
+    eq(await waitMpvGet('mute', v => v === false), false, 'second ToggleMute restores mute');
 });
 
 t(6, 'SetRepeatMode maps to mpv loop properties', async () => {
-    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatAll' }); await sleep(500);
-    eq(await mpvGet('loop-playlist'), 'inf', 'RepeatAll -> loop-playlist=inf');
-    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatOne' }); await sleep(500);
-    eq(await mpvGet('loop-file'), 'inf', 'RepeatOne -> loop-file=inf');
-    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatNone' }); await sleep(500);
-    check((await mpvGet('loop-playlist')) !== 'inf', 'RepeatNone did not clear loop-playlist');
+    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatAll' });
+    eq(await waitMpvGet('loop-playlist', v => v === 'inf'), 'inf', 'RepeatAll -> loop-playlist=inf');
+    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatOne' });
+    eq(await waitMpvGet('loop-file', v => v === 'inf'), 'inf', 'RepeatOne -> loop-file=inf');
+    await generalCmd('SetRepeatMode', { RepeatMode: 'RepeatNone' });
+    const cleared = await waitMpvGet('loop-playlist', v => v === false || v === 'no');
+    check(cleared === false || cleared === 'no', `RepeatNone did not clear loop-playlist (got ${JSON.stringify(cleared)})`);
 });
 
 t(7, 'DisplayMessage shows the message without pausing (web parity)', async () => {
@@ -709,7 +787,15 @@ t(15, 'NextTrack / PreviousTrack navigate the playlist', async ({ items }) => {
     await waitForSince(m, 'File loaded by MPV', 25000);
     const afterNext = await mpvGet('playlist-current-pos');
     check(afterNext > before, `NextTrack did not advance (${before} -> ${afterNext})`);
+    // let the transition fully settle before reversing: the shim debounces
+    // commands during file loads (isPlayingNext) — a reverse command fired
+    // mid-load gets dropped, and late transition logs can satisfy the waits
+    // below for work that is not ours
+    await sleep(2500);
     await seekWhenReady(5);
+    // the shim's >30s restart rule reads its own 1s-polled position — give the
+    // poll a tick past the seek or PreviousTrack restarts instead of stepping back
+    await sleep(1200);
     m = markLog();
     await playstate('PreviousTrack');
     await waitForSince(m, /Starting previous episode|Playlist changed/, 15000);
@@ -737,8 +823,9 @@ t(16, 'skip intro: S-key wire path seeks past the segment', async ({ items }) =>
     const startSec = Math.min(seg.StartTicks / 10000000 + 5, Math.max(introEnd - 2, 1));
     await seekWhenReady(startSec);
     await mpvCmd('script-message', 'jellyfin-skip-intro');
-    await sleep(1500);
-    const pos = await mpvGet('time-pos');
+    // remote-stream seeks take variable time to land — poll instead of trusting
+    // a fixed sleep (seen live: a mid-seek read looked like a missed skip)
+    const pos = await waitMpvGet('time-pos', p => typeof p === 'number' && p >= introEnd - 2, 8000);
     check(typeof pos === 'number', `no position after skip (got ${JSON.stringify(pos)})`);
     check(pos >= introEnd - 2, `skip did not jump past intro end (pos=${pos}, introEnd=${introEnd}, dur=${dur})`);
     await waitFor(/Skip intro requested/, 5000);
@@ -1144,10 +1231,17 @@ t(32, 'unwatched-quit: saves no position anywhere, item reset to unwatched', asy
 t(35, 'apiKey: media URLs carry the configured key; token fallback; logs redacted', async ({ items }) => {
     // #386/#388: mediaApiKey() must prefer CONFIG.apiKey over the access token,
     // and whatever ends up in the URL must be redacted to *** in shim logs.
-    const created = await post('/Auth/Keys', null, { app: `${TEST_NAME}-urlcheck` });
+    // /Auth/Keys is admin-only → use the cfg.username session (the test user
+    // must NOT be an admin).
+    if (!adminHeaders) return skip('no admin session — cannot manage API keys');
+    const pre = await aget('/Auth/Keys');
+    for (const k of (pre.data.Items || [])) {
+        if (k.AppName === `${TEST_NAME}-urlcheck`) await adel('/Auth/Keys/' + k.AccessToken); // leftovers of crashed runs
+    }
+    const created = await apost('/Auth/Keys', null, { app: `${TEST_NAME}-urlcheck` });
     if (created.status === 401 || created.status === 403) return skip('admin required to create API keys');
     check(created.status < 400, `API key creation rejected (${created.status})`);
-    const list = await get('/Auth/Keys');
+    const list = await aget('/Auth/Keys');
     const key = (list.data.Items || []).find(k => k.AppName === `${TEST_NAME}-urlcheck`);
     check(key, 'created API key not listed');
     try {
@@ -1184,7 +1278,7 @@ t(35, 'apiKey: media URLs carry the configured key; token fallback; logs redacte
         await waitFor('WebSocket connection established', 30000);
         await connectIpcWhenReady().catch(() => {});
         // revocation takes the TOKEN string, not the numeric Id (all Ids report 0)
-        await del('/Auth/Keys/' + key.AccessToken);
+        await adel('/Auth/Keys/' + key.AccessToken);
     }
 });
 
@@ -1305,11 +1399,14 @@ t(38, 'completed item ends watched with NO resume position (server or local)', a
 });
 
 t(23, 'security: token never appears in shim logs', async () => {
-    const r = await api.post('/Users/AuthenticateByName', { Username: cfg.username, Pw: cfg.password }, {
+    // the shim's config carries the TEST user's credentials (writeConfig) —
+    // that is what must never leak; the account password is checked too
+    const r = await api.post('/Users/AuthenticateByName', { Username: testUser.username, Pw: testUser.password }, {
         headers: { 'Content-Type': 'application/json', Authorization: `MediaBrowser Client="x", Device="x", DeviceId="tokcheck", Version="1.0"` }
     });
     check(!shimOut.includes(r.data.AccessToken), 'access token leaked into logs');
-    check(!shimOut.includes(cfg.password), 'password leaked into logs');
+    check(!shimOut.includes(testUser.password), 'e2e password leaked into logs');
+    check(!shimOut.includes(cfg.password), 'account password leaked into logs');
     // this throwaway session exists only for the check — do not leave it behind
     await api.post('/Sessions/Logout', {}, {
         headers: { Authorization: `MediaBrowser Token="${r.data.AccessToken}", Client="x", Device="x", DeviceId="tokcheck", Version="1.0"` },
@@ -1472,6 +1569,108 @@ t(34, 'presence socket: shim keeps its session through a single-socket kill', as
     await proxy.close();
 });
 
+// ---------- test user (scrobble isolation) ----------
+// The identity the shim runs under. MUST NOT be the real account and MUST NOT
+// be configured in jellyfin-ani-sync — see the header note. Password is stored
+// in data/e2e-test-user.json so reruns keep the same user (created once, reset
+// via admin only when the stored password stops working).
+async function ensureTestUser() {
+    if (E2E_USERNAME.toLowerCase() === cfg.username.toLowerCase()) {
+        throw new Error(`E2E_USERNAME must NOT be the real account (${cfg.username}) — test playback would scrobble via jellyfin-ani-sync. Use a dedicated user.`);
+    }
+    try { adminHeaders = await loginAdmin(); } catch { adminHeaders = null; }
+
+    if (process.env.E2E_USERNAME && process.env.E2E_PASSWORD) {
+        testUser = { username: E2E_USERNAME, password: process.env.E2E_PASSWORD };
+        const ok = await loginAs(testUser.username, testUser.password, 'e2e-verify').catch(() => null);
+        if (!ok) throw new Error(`E2E_USERNAME/E2E_PASSWORD rejected by ${cfg.serverUrl}`);
+        await api.post('/Sessions/Logout', {}, { headers: ok.Authorization, validateStatus: () => true });
+        console.log(`Test user: ${testUser.username} (E2E_USERNAME/E2E_PASSWORD)`);
+        return;
+    }
+
+    if (!adminHeaders) {
+        throw new Error('config.js username must be a Jellyfin admin to auto-provision the e2e test user — or set E2E_USERNAME/E2E_PASSWORD to a manually created user that is NOT configured in jellyfin-ani-sync.');
+    }
+
+    let stored = null;
+    try { stored = JSON.parse(fs.readFileSync(E2E_USER_FILE, 'utf8')); } catch {}
+    const all = await aget('/Users');
+    if (all.status !== 200) throw new Error(`cannot list users (${all.status})`);
+    let user = (all.data || []).find(u => u.Name && u.Name.toLowerCase() === E2E_USERNAME.toLowerCase());
+
+    if (user && stored && stored.password) {
+        const ok = await loginAs(user.Name, stored.password, 'e2e-verify').catch(() => null);
+        if (ok) {
+            await api.post('/Sessions/Logout', {}, { headers: ok.Authorization, validateStatus: () => true });
+            await applyTestUserPolicy(user.Id);
+            testUser = { username: user.Name, password: stored.password };
+            console.log(`Test user: ${user.Name} (existing)`);
+            return;
+        }
+    }
+
+    const password = crypto.randomBytes(24).toString('base64url');
+    if (!user) {
+        const created = await apost('/Users/New', { Name: E2E_USERNAME, Password: password });
+        if (created.status >= 400) throw new Error(`test user creation rejected (${created.status} ${JSON.stringify(created.data).slice(0, 150)})`);
+        user = created.data;
+        if (!user || !user.Id) {
+            const again = await aget('/Users');
+            user = (again.data || []).find(u => u.Name && u.Name.toLowerCase() === E2E_USERNAME.toLowerCase());
+        }
+        console.log(`Test user: ${E2E_USERNAME} (created)`);
+    } else {
+        // POST /Users/Password takes userId as a QUERY parameter
+        const pw = await apost('/Users/Password', { NewPw: password, ResetPassword: true }, { userId: user.Id });
+        if (pw.status >= 400) throw new Error(`test user password reset rejected (${pw.status} ${JSON.stringify(pw.data).slice(0, 150)})`);
+        console.log(`Test user: ${user.Name} (password reset)`);
+    }
+    if (!user || !user.Id) throw new Error('test user provisioning lost the user record');
+    await applyTestUserPolicy(user.Id);
+    const ok = await loginAs(user.Name, password, 'e2e-verify').catch(() => null);
+    if (!ok) throw new Error('freshly provisioned test user cannot log in');
+    await api.post('/Sessions/Logout', {}, { headers: ok.Authorization, validateStatus: () => true });
+    testUser = { username: user.Name, password };
+    fs.mkdirSync(path.dirname(E2E_USER_FILE), { recursive: true });
+    fs.writeFileSync(E2E_USER_FILE, JSON.stringify({ username: user.Name, password, userId: user.Id }, null, 2), { mode: 0o600 });
+}
+
+async function applyTestUserPolicy(userId) {
+    const u = await aget('/Users/' + userId);
+    if (u.status !== 200 || !u.data || !u.data.Policy) throw new Error(`cannot read test user policy (${u.status})`);
+    // GET-modify-POST: the endpoint replaces the whole policy object
+    const policy = { ...u.data.Policy, EnableAllFolders: true, IsHidden: true, IsDisabled: false };
+    const r = await apost('/Users/' + userId + '/Policy', policy);
+    if (r.status >= 400) throw new Error(`test user policy update rejected (${r.status})`);
+}
+
+async function assertScrobbleIsolation() {
+    // Hard preflight BEFORE any playback: a test user listed in jellyfin-ani-
+    // sync's UserConfig would sync every completed test playback to
+    // AniList/MAL. Never log the config body — it contains provider API tokens.
+    if (!adminHeaders) {
+        console.log('⚠️  scrobble isolation UNVERIFIED (no admin session to read jellyfin-ani-sync config)');
+        return;
+    }
+    const plugins = await aget('/Plugins');
+    const anisync = (plugins.data || []).find(p => /ani.?sync/i.test(String(p.Name)) || /ani.?sync/i.test(String(p.Id)));
+    if (!anisync) { console.log('Scrobble isolation: jellyfin-ani-sync not installed'); return; }
+    const c = await aget('/Plugins/' + encodeURIComponent(anisync.Id) + '/Configuration');
+    if (c.status !== 200) {
+        console.log(`⚠️  scrobble isolation UNVERIFIED (plugin config unreadable: ${c.status})`);
+        return;
+    }
+    const configured = ((c.data || {}).UserConfig || []).map(u => u.UserId);
+    if (configured.includes(authHeaders.userId)) {
+        console.error(`REFUSING TO RUN: the e2e test user (${testUser.username}) is configured in jellyfin-ani-sync —`);
+        console.error('every completed test playback would sync to AniList/MAL. Remove it from the plugin');
+        console.error('user list (Dashboard → Plugins → Ani Sync) and re-run.');
+        process.exit(1);
+    }
+    console.log(`Scrobble isolation: ${testUser.username} not in jellyfin-ani-sync UserConfig (${configured.length} user(s) configured)`);
+}
+
 // ---------- runner ----------
 // If the event loop ever drains before the run completes (a hung await with no
 // live handles — e.g. server.close() waiting on a stalled socket), Node exits
@@ -1484,22 +1683,24 @@ process.on('beforeExit', () => {
 });
 async function main() {
     reapStaleTestMpvs();
+    await ensureTestUser(); // sets testUser + adminHeaders — must precede writeConfig
     writeConfig();
     const loginInfo = await login('e2e-runner');
     authHeaders = loginInfo;
+    await assertScrobbleIsolation(); // hard preflight BEFORE any playback
 
-    // The suite plays NextUp items and rewrites UserData (played/position/
-    // favorite) around every test. If a human is watching the same account
-    // concurrently, the restore step fights their marks and the web UI churns
-    // (observed live: watched flags reverting, UserDataChanged storms).
+    // Running while a human watches the server competes for remote bandwidth
+    // and transcode slots on their stream. Cross-user visibility needs admin —
+    // without it the check only sees the suite's own sessions.
     if (!process.argv.includes('--force')) {
-        const s = await get('/Sessions');
-        const busy = (s.data || []).filter(x => x.DeviceId !== TEST_ID && x.NowPlayingItem);
+        const s = adminHeaders ? await aget('/Sessions') : await get('/Sessions');
+        if (!adminHeaders) console.log('⚠️  busy check limited to own sessions (no admin session)');
+        const busy = (s.data || []).filter(x => x.DeviceId !== TEST_ID && x.DeviceId !== 'e2e-runner' && x.NowPlayingItem);
         if (busy.length) {
-            console.error('REFUSING TO RUN: another session is actively playing on this account:');
+            console.error('REFUSING TO RUN: a session is actively playing on the server:');
             for (const b of busy) console.error(`  - ${b.DeviceName} (${b.DeviceId}) is playing "${b.NowPlayingItem.Name}"`);
-            console.error('The suite plays NextUp items and rewrites UserData; running it now will');
-            console.error('fight the viewer. Wait for them to finish, or re-run with --force.');
+            console.error('The suite streams real library items; running it now competes with the viewer');
+            console.error('for bandwidth/transcode slots. Wait for them to finish, or re-run with --force.');
             process.exit(1);
         }
     }
