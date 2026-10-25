@@ -605,7 +605,7 @@ Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to 
 - `shim.js` reads `package.json` at runtime for version — never hardcode version strings
 - The shim connects to Jellyfin over HTTP by default — HTTPS requires correct `serverUrl`
 - `mpvFlags` user config is passed directly to MPV as command-line arguments — no sanitization (intentional, user controls their own machine)
-- **Secrets redaction**: `redact()` function masks `api_key` and `X-Emby-Token` in log output
+- **Secrets redaction**: `redact()` function masks `api_key` and `X-Emby-Token` in log output. It is also the CodeQL `js/clear-text-logging` taint barrier — its name matches the sanitizer regex, and the barrier is the explicit `redact(...)` call node AT the log sink (a runtime `includes()` guard is not one). Any log interpolating env-derived values (e.g. `E2E_USERNAME`/`E2E_PASSWORD` in the e2e suite) must go through it; `tests/quality.test.mjs` pins both the shim and e2e call shapes
 - **Token file permissions**: Data directory created with `chmod 0o700`, token files with `chmod 0o600`
 - **Stale IPC socket cleanup**: `fs.unlinkSync()` called before spawning mpv to clean up stale sockets from previous crashes
 

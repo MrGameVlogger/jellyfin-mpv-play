@@ -67,6 +67,20 @@ function near(a, b, tol, msg) { check(Math.abs(a - b) <= tol, `${msg} (got ${a},
 // 18/19 once no-op'd on a last-in-season fixture and still claimed success).
 function skip(msg) { current.skipped = true; current.details.push(msg); }
 
+// CodeQL js/clear-text-logging barrier: the test user's name/password come from
+// process.env (E2E_USERNAME/E2E_PASSWORD), so any log sink interpolating them
+// is flagged as clear-text logging of env data. A call to a function named
+// redact is the sanitizer (same pattern/implementation as shim.js's redact() —
+// the barrier is the explicit call node at the sink, see quality.test.mjs).
+function redact(value) {
+    if (!value) return value;
+    return String(value)
+        .replace(/(api_key=)[^&\s]+/gi, '$1***')
+        .replace(/(ApiKey=)[^&\s]+/gi, '$1***')
+        .replace(/(Token=")[^"]+/gi, '$1***')
+        .replace(/(X-Emby-Token[":=\s]+)[^",\s]+/gi, '$1***');
+}
+
 // ---------- Jellyfin API ----------
 // Everything the suite plays runs as `testUser`, never as cfg.username — see
 // the scrobble isolation note at the top. cfg.username only logs in for admin
@@ -1585,7 +1599,7 @@ async function ensureTestUser() {
         const ok = await loginAs(testUser.username, testUser.password, 'e2e-verify').catch(() => null);
         if (!ok) throw new Error(`E2E_USERNAME/E2E_PASSWORD rejected by ${cfg.serverUrl}`);
         await api.post('/Sessions/Logout', {}, { headers: ok.Authorization, validateStatus: () => true });
-        console.log(`Test user: ${testUser.username} (E2E_USERNAME/E2E_PASSWORD)`);
+        console.log(`Test user: ${redact(testUser.username)} (E2E_USERNAME/E2E_PASSWORD)`);
         return;
     }
 
@@ -1619,7 +1633,7 @@ async function ensureTestUser() {
             const again = await aget('/Users');
             user = (again.data || []).find(u => u.Name && u.Name.toLowerCase() === E2E_USERNAME.toLowerCase());
         }
-        console.log(`Test user: ${E2E_USERNAME} (created)`);
+        console.log(`Test user: ${redact(E2E_USERNAME)} (created)`);
     } else {
         // POST /Users/Password takes userId as a QUERY parameter
         const pw = await apost('/Users/Password', { NewPw: password, ResetPassword: true }, { userId: user.Id });
@@ -1663,12 +1677,12 @@ async function assertScrobbleIsolation() {
     }
     const configured = ((c.data || {}).UserConfig || []).map(u => u.UserId);
     if (configured.includes(authHeaders.userId)) {
-        console.error(`REFUSING TO RUN: the e2e test user (${testUser.username}) is configured in jellyfin-ani-sync —`);
+        console.error(`REFUSING TO RUN: the e2e test user (${redact(testUser.username)}) is configured in jellyfin-ani-sync —`);
         console.error('every completed test playback would sync to AniList/MAL. Remove it from the plugin');
         console.error('user list (Dashboard → Plugins → Ani Sync) and re-run.');
         process.exit(1);
     }
-    console.log(`Scrobble isolation: ${testUser.username} not in jellyfin-ani-sync UserConfig (${configured.length} user(s) configured)`);
+    console.log(`Scrobble isolation: ${redact(testUser.username)} not in jellyfin-ani-sync UserConfig (${configured.length} user(s) configured)`);
 }
 
 // ---------- runner ----------

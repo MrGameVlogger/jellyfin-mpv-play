@@ -406,3 +406,17 @@ test('mpv command logging cannot leak the ApiKey', () => {
     'sendMpvCommand logging must not branch on arg content (not a taint barrier)'
   );
 });
+
+test('e2e logs the test-user identity only through redact()', () => {
+  const e2e = fs.readFileSync('tests/e2e.live.mjs', 'utf8');
+
+  // CodeQL js/clear-text-logging: the e2e test user's name/password come from
+  // process.env (E2E_USERNAME/E2E_PASSWORD), so every console sink that
+  // interpolates the identity must go through an explicit redact() call node —
+  // the same barrier as sendMpvCommand above (a runtime guard is not one).
+  const sinks = e2e.split('\n').filter(l => /console\.(log|error)\(/.test(l) && /testUser\.|E2E_USERNAME/.test(l));
+  assert(sinks.length >= 4, `expected env-identity log sinks in e2e.live.mjs, found ${sinks.length}`);
+  for (const l of sinks) {
+    assert(l.includes('redact('), `e2e log sink must wrap env-derived identity in redact(): ${l.trim()}`);
+  }
+});
