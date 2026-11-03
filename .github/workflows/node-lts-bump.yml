@@ -9,6 +9,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  workflows: write # the bump commit edits .github/workflows/build.yml (NODE_VERSION pin)
 
 concurrency:
   group: node-lts-bump
