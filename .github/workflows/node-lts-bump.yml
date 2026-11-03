@@ -9,7 +9,6 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  workflows: write # the bump commit edits .github/workflows/build.yml (NODE_VERSION pin)
 
 concurrency:
   group: node-lts-bump
@@ -30,19 +29,14 @@ jobs:
           node <<'EOF'
           const fs = require('fs');
           const index = JSON.parse(fs.readFileSync('/tmp/node-index.json', 'utf8'));
-          const sh = fs.readFileSync('macapp/build.sh', 'utf8');
-          const yml = fs.readFileSync('.github/workflows/build.yml', 'utf8');
+          const pinFile = fs.readFileSync('.node-version', 'utf8').trim();
 
-          const shPin = (sh.match(/^NODE_VERSION="([^"]+)"/m) || [])[1];
-          const ymlPin = (yml.match(/NODE_VERSION: '([^']+)'/) || [])[1];
-          if (!shPin || !ymlPin) {
-            console.log('::error::Could not read NODE_VERSION pins (build.sh=' + shPin + ' build.yml=' + ymlPin + ')');
+          const pinMatch = pinFile.match(/^(\d+\.\d+\.\d+)$/);
+          if (!pinMatch) {
+            console.log('::error::Could not read NODE_VERSION pin from .node-version (got ' + JSON.stringify(pinFile) + ')');
             process.exit(1);
           }
-          if (shPin !== ymlPin) {
-            console.log('::error::Pin mismatch: build.sh=' + shPin + ' build.yml=' + ymlPin + ' — fix before bumping');
-            process.exit(1);
-          }
+          const shPin = pinMatch[1];
 
           const major = shPin.split('.')[0];
           const lineLatest = index.find(r => r.lts !== false && r.version.startsWith('v' + major + '.'));
@@ -77,20 +71,19 @@ jobs:
             exit 0
           fi
 
-          sed -i "s/NODE_VERSION=\"[^\"]*\"/NODE_VERSION=\"${NEW}\"/" macapp/build.sh
-          sed -i "s/NODE_VERSION: '[^']*'/NODE_VERSION: '${NEW}'/" .github/workflows/build.yml
+          printf '%s\n' "${NEW}" > .node-version
 
           npm test
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add macapp/build.sh .github/workflows/build.yml
+          git add .node-version
           git commit -m "build: bump bundled Node.js to ${NEW} (LTS)"
           git push -u origin "$BRANCH"
 
           cat > /tmp/pr-body.md <<EOF
-          Automated LTS patch bump. Pins updated in lockstep in macapp/build.sh and .github/workflows/build.yml; npm test enforces the match.
+          Automated LTS patch bump. The pin lives in .node-version (single source of truth for macapp/build.sh and .github/workflows/build.yml); npm test enforces the consumers.
 
           - Current pin: ${OLD}
           - New pin: ${NEW}
@@ -122,7 +115,7 @@ jobs:
 
           Major runtime moves are deliberate, not automated. When ready:
 
-          1. Bump NODE_VERSION in macapp/build.sh and .github/workflows/build.yml (npm test enforces the match)
+          1. Bump the pin in .node-version (macapp/build.sh and .github/workflows/build.yml read it at build time; npm test enforces the consumers)
           2. Update the Node.js LTS references in README.md and CONTRIBUTING.md
           3. Rebuild and smoke-test: cd macapp && ./build.sh
           4. Cut a release so all three platform bundles pick up the new runtime
