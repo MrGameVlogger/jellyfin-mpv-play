@@ -12,9 +12,6 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  NODE_VERSION: '24.22.1'  # Must match macapp/build.sh NODE_VERSION
-
 jobs:
   get-version:
     runs-on: ubuntu-latest
@@ -88,11 +85,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Read Node.js pin
+        id: node-version
+        run: |
+          V="$(tr -d '[:space:]' < .node-version)"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "NODE_VERSION=$V" >> "$GITHUB_ENV"
+
       - name: Cache Node.js
         uses: actions/cache@v6
         with:
           path: .node-cache
-          key: node-linux-x64-${{ env.NODE_VERSION }}
+          key: node-linux-x64-${{ steps.node-version.outputs.version }}
 
       - name: Download Node.js
         run: |
@@ -140,19 +144,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Read Node.js pin
+        id: node-version
+        shell: pwsh
+        run: |
+          $v = (Get-Content .node-version -Raw).Trim()
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "NODE_VERSION=$v" >> $env:GITHUB_ENV
+
       - name: Cache Node.js
         uses: actions/cache@v6
         with:
           path: .node-cache
-          key: node-win-x64-${{ env.NODE_VERSION }}
+          key: node-win-x64-${{ steps.node-version.outputs.version }}
 
       - name: Download Node.js
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path .node-cache | Out-Null
-          $zip = ".node-cache/node-v${{ env.NODE_VERSION }}-win-x64.zip"
+          $zip = ".node-cache/node-v${{ steps.node-version.outputs.version }}-win-x64.zip"
           if (-not (Test-Path $zip)) {
-            Invoke-WebRequest -Uri "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip" -OutFile $zip
+            Invoke-WebRequest -Uri "https://nodejs.org/dist/v${{ steps.node-version.outputs.version }}/node-v${{ steps.node-version.outputs.version }}-win-x64.zip" -OutFile $zip
           }
           Write-Output "NODE_ZIP=$zip" >> $env:GITHUB_ENV
 
@@ -168,7 +180,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$name/node" | Out-Null
 
           Expand-Archive -Path "${{ env.NODE_ZIP }}" -DestinationPath .node-cache -Force
-          $nodeDir = ".node-cache/node-v${{ env.NODE_VERSION }}-win-x64"
+          $nodeDir = ".node-cache/node-v${{ steps.node-version.outputs.version }}-win-x64"
           Copy-Item "$nodeDir/node.exe" "$name/node/"
           Copy-Item "$nodeDir/*.dll" "$name/node/"
 

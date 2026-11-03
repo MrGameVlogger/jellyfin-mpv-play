@@ -14,13 +14,12 @@ APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 SOURCES_DIR="$BUILD_DIR/Sources"
 RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
 
-NODE_VERSION="24.22.1"
 NODE_DIR="$RESOURCES_DIR/node"
 
 echo "Building $APP_NAME..."
 
 # Preflight
-for required in "$PROJECT_DIR/shim.js" "$PROJECT_DIR/package.json" "$PROJECT_DIR/config.example.js" "$PROJECT_DIR/images/icon-light.svg" "$PROJECT_DIR/images/icon-dark.svg"; do
+for required in "$PROJECT_DIR/shim.js" "$PROJECT_DIR/package.json" "$PROJECT_DIR/config.example.js" "$PROJECT_DIR/images/icon-light.svg" "$PROJECT_DIR/images/icon-dark.svg" "$PROJECT_DIR/.node-version"; do
     if [ ! -f "$required" ]; then
         echo "ERROR: Missing required file: $required" >&2
         exit 1
@@ -30,6 +29,11 @@ if [ ! -d "$PROJECT_DIR/node_modules" ]; then
     echo "ERROR: node_modules not found. Run 'npm install' in $PROJECT_DIR first." >&2
     exit 1
 fi
+
+# Bundled Node.js pin lives in .node-version at the repo root — single source of
+# truth shared with .github/workflows/build.yml (GITHUB_TOKEN can never push
+# workflow-file edits, so the pin must not live in .github/workflows/).
+NODE_VERSION="$(tr -d '[:space:]' < "$PROJECT_DIR/.node-version")"
 
 # Clean old build
 rm -rf "$APP_BUNDLE"

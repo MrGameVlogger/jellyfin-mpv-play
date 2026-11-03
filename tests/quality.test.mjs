@@ -132,27 +132,32 @@ test('package.json version matches Info.plist version', () => {
   );
 });
 
-test('bundled Node.js pin matches across build.sh and build.yml', () => {
+test('bundled Node.js pin is a single source of truth in .node-version', () => {
+  const pinFile = fs.readFileSync('.node-version', 'utf8').trim();
+  assert(
+    /^\d+\.\d+\.\d+$/.test(pinFile),
+    `.node-version pin "${pinFile}" is not a concrete x.y.z version`
+  );
+
   const buildSh = fs.readFileSync('macapp/build.sh', 'utf8');
   const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
 
-  const shMatch = buildSh.match(/^NODE_VERSION="([^"]+)"/m);
-  const ymlMatch = workflow.match(/NODE_VERSION:\s*'([^']+)'/);
+  assert(
+    buildSh.includes('.node-version'),
+    'macapp/build.sh must read the pin from .node-version'
+  );
+  assert(
+    !/^NODE_VERSION="\d/m.test(buildSh),
+    'macapp/build.sh must not hardcode NODE_VERSION'
+  );
 
-  assert(shMatch, 'NODE_VERSION not found in macapp/build.sh');
-  assert(ymlMatch, "NODE_VERSION not found in .github/workflows/build.yml");
-
-  for (const ver of [shMatch[1], ymlMatch[1]]) {
-    assert(
-      /^\d+\.\d+\.\d+$/.test(ver),
-      `Node.js pin "${ver}" is not a concrete x.y.z version`
-    );
-  }
-
-  assert.strictEqual(
-    shMatch[1],
-    ymlMatch[1],
-    `Node.js pin mismatch: build.sh has ${shMatch[1]}, build.yml has ${ymlMatch[1]}`
+  assert(
+    workflow.includes('.node-version'),
+    '.github/workflows/build.yml must read the pin from .node-version'
+  );
+  assert(
+    !/NODE_VERSION:\s*'\d/.test(workflow),
+    '.github/workflows/build.yml must not hardcode NODE_VERSION (GITHUB_TOKEN cannot push workflow-file edits, so the pin must live outside .github/workflows/)'
   );
 });
 

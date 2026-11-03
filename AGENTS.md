@@ -58,6 +58,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `config.js` | User config with credentials (gitignored) |
 | `config.example.js` | Template for `config.js` |
 | `package.json` | Version source of truth (single source — `clientVersion` reads from here at runtime) |
+| `.node-version` | Bundled Node.js pin (single source — read at build time by `macapp/build.sh` and `.github/workflows/build.yml`; never hardcoded in workflow files) |
 | `data/` | Runtime state: auth tokens, playback positions, device ID (gitignored) |
 | `data/shim-<configname>.log` | Headless mode log output (created when `headless: true`) |
 | `macapp/Sources/*.swift` | Native macOS menubar app (11 files) |
@@ -647,6 +648,7 @@ Title format for `Episode detected`: `SeriesName - SxEp - EpisodeName` (assemble
 - MPV args are minimal. User's `~/.config/mpv/mpv.conf` handles vo, hwdec, ao, cache, etc.
 - **Stays in the fork network deliberately** — GitHub's "Leave fork network" drops issues, PRs and "other metadata" (that means the 350+ PR record and likely the release assets), which outweighs the cosmetic "forked from" tag.
 - `gh` CLI defaults to upstream repo (JohnGlaus), not the fork. Run `gh repo set-default MrGameVlogger/jellyfin-mpv-play` or use `-R MrGameVlogger/jellyfin-mpv-play` with release commands.
+- **`GITHUB_TOKEN` can never push workflow-file edits** — a push whose diff touches `.github/workflows/*` is rejected server-side ("refusing to allow a GitHub App to create or update workflow ... without `workflows` permission"), and `workflows: write` in a `permissions` block makes the whole workflow FAIL TO PARSE (422 "Unexpected value 'workflows'" — it is not in the schema). `contents: write` is not enough. This is why the bundled Node.js pin lives in `.node-version`, outside the workflow files. Any automation that must edit workflow files needs a PAT/App token with the workflows scope wired into `actions/checkout`'s `token:` input.
 - All windows use standard layering (no `.floating`). Status bar icons are template images — they adapt to light/dark mode automatically.
 - `ConfigParser.swift` is the shared utility for config file parsing and Application Support paths. Used by AppDelegate, NodeProcessManager, and PreferencesWindowController.
 - `Info.plist` has TWO version keys: `CFBundleVersion` (build number) and `CFBundleShortVersionString` (display version). Both must be updated when testing locally.
@@ -788,7 +790,7 @@ open "/Applications/Jellyfin MPV Play.app"
 - **⚠️ NEVER push directly to `main`** — always create a branch and open a PR, even for docs or small fixes. The branch protection allows maintainer bypass but this should not be used.
 - **Make PRs frequently during development** — Each logical change (bug fix, feature, docs update) should be its own PR. Don't batch everything into one giant PR at release time. Small, focused PRs are easier to review and merge. When you finish a fix or feature, commit it and make a PR immediately before moving on to the next task.
 - **Dependabot**: Weekly npm dependency updates on Mondays
-- **Node LTS bump** (`.github/workflows/node-lts-bump.yml`): Weekly check of the bundled Node.js pin (`NODE_VERSION` in `macapp/build.sh` AND `.github/workflows/build.yml` — kept in lockstep, `tests/quality.test.mjs` enforces the match). Same-major LTS patches open an auto-PR; a new LTS major opens an evaluation issue (major runtime moves are deliberate). PRs from this workflow use the default `GITHUB_TOKEN`, so labeler/CI do not run on them.
+- **Node LTS bump** (`.github/workflows/node-lts-bump.yml`): Weekly check of the bundled Node.js pin (`.node-version` — the single source of truth read at build time by `macapp/build.sh` and `.github/workflows/build.yml`; `tests/quality.test.mjs` enforces the consumers). Same-major LTS patches open an auto-PR editing only `.node-version`; a new LTS major opens an evaluation issue (major runtime moves are deliberate). PRs from this workflow use the default `GITHUB_TOKEN`, so labeler/CI do not run on them. The pin deliberately lives OUTSIDE `.github/workflows/` — `GITHUB_TOKEN` can never push workflow-file edits (see Gotchas).
 - **Auto-labeler**: PRs auto-labeled by file paths (macos, shim, documentation, ci, dependencies, images, linux, windows)
 - **Signed commits and tags**: SSH signing configured in global git config — all commits and tags should be signed
 
