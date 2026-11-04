@@ -12,7 +12,7 @@
   <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square">
   <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Downloads" src="https://img.shields.io/github/downloads/MrGameVlogger/jellyfin-mpv-play/total?style=flat-square"></a>
-  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-22%20LTS-brightgreen?style=flat-square&logo=node.js">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-26%20LTS-brightgreen?style=flat-square&logo=node.js">
 </p>
 
 <p align="center">
