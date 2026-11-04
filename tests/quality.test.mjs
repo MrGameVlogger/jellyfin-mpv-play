@@ -161,6 +161,30 @@ test('bundled Node.js pin is a single source of truth in .node-version', () => {
   );
 });
 
+test('macOS deployment floor is consistent across Info.plist and build.sh', () => {
+  const plist = fs.readFileSync('macapp/Info.plist', 'utf8');
+  const buildSh = fs.readFileSync('macapp/build.sh', 'utf8');
+
+  const plistMatch = plist.match(/<key>LSMinimumSystemVersion<\/key>\s*<string>([\d.]+)<\/string>/);
+  const envMatch = buildSh.match(/MACOSX_DEPLOYMENT_TARGET=([\d.]+)/);
+  const targetMatch = buildSh.match(/-target "\$ARCH-apple-macos([\d.]+)"/);
+
+  assert(plistMatch, 'LSMinimumSystemVersion not found in Info.plist');
+  assert(envMatch, 'MACOSX_DEPLOYMENT_TARGET not found in build.sh');
+  assert(targetMatch, 'swiftc -target macos floor not found in build.sh');
+
+  assert.strictEqual(
+    plistMatch[1],
+    envMatch[1],
+    `macOS floor mismatch: Info.plist says ${plistMatch[1]}, build.sh MACOSX_DEPLOYMENT_TARGET says ${envMatch[1]}`
+  );
+  assert.strictEqual(
+    plistMatch[1],
+    targetMatch[1],
+    `macOS floor mismatch: Info.plist says ${plistMatch[1]}, swiftc -target says ${targetMatch[1]}`
+  );
+});
+
 test('Linux bundle ships its own libatomic and launch.sh exports LD_LIBRARY_PATH', () => {
   const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
   const launchSh = fs.readFileSync('linux/launch.sh', 'utf8');

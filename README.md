@@ -56,6 +56,8 @@
 
 All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. The Linux bundle also carries its own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros.
 
+**Supported platforms:** macOS 13.5+ (Apple Silicon release bundle; Intel Macs: build from source with `./macapp/build.sh`) · Linux x86-64 with glibc 2.28+ (not musl/Alpine) · Windows 10 1809+.
+
 ---
 
 ## Quick Start
@@ -573,7 +575,7 @@ MIT License — Feel free to use and modify! See [LICENSE](LICENSE).
 ## FAQ
 
 **Q: Does this work on macOS?**
-A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 26 LTS — no separate installation needed.
+A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 26 LTS — no separate installation needed. Requires macOS 13.5+. The release bundle is Apple Silicon; on Intel Macs, build from source (`cd macapp && ./build.sh` compiles for your Mac's architecture).
 
 **Q: Does this work on Linux?**
 A: Yes. Download the Linux bundle from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases), extract, and run `./launch.sh`. Set `mpvPath` to `/usr/bin/mpv` (or wherever MPV is installed). The bundle is self-contained (including `libatomic` for the bundled Node.js). If `launch.sh` still fails with a loader error, make sure the bundle's `lib/` directory is intact and your glibc is 2.28 or newer.
