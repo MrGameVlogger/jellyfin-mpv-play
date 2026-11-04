@@ -523,13 +523,40 @@ class NodeProcessManager {
         }
     }
 
+    // Returns true if the given node binary actually executes. Catches the case
+    // where the binary exists but cannot run on this system — e.g. its
+    // LC_BUILD_VERSION minos is newer than the running macOS (dyld load error),
+    // or a foreign architecture — which FileManager.isExecutableFile cannot see.
+    private func nodeRuns(_ path: String) -> Bool {
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: path)
+        probe.arguments = ["--version"]
+        probe.standardOutput = FileHandle.nullDevice
+        probe.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        probe.terminationHandler = { _ in done.signal() }
+        do {
+            try probe.run()
+        } catch {
+            return false
+        }
+        if done.wait(timeout: .now() + 3) == .timedOut {
+            probe.terminate()
+            return false
+        }
+        return probe.terminationStatus == 0
+    }
+
     private func findNodePath() -> String {
         // Prefer bundled Node from app Resources
         if let bundlePath = Bundle.main.resourcePath {
             let bundledNode = "\(bundlePath)/node/bin/node"
             if FileManager.default.isExecutableFile(atPath: bundledNode) {
-                logHandler("Using bundled node: \(bundledNode)")
-                return bundledNode
+                if nodeRuns(bundledNode) {
+                    logHandler("Using bundled node: \(bundledNode)")
+                    return bundledNode
+                }
+                logHandler("Bundled node is not runnable on this system, trying system node")
             }
         }
 
@@ -540,7 +567,7 @@ class NodeProcessManager {
             "/usr/bin/node"
         ]
         for path in paths {
-            if FileManager.default.isExecutableFile(atPath: path) {
+            if FileManager.default.isExecutableFile(atPath: path) && nodeRuns(path) {
                 logHandler("Using system node: \(path)")
                 return path
             }
@@ -550,7 +577,7 @@ class NodeProcessManager {
             let sorted = versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }
             for v in sorted {
                 let nodePath = "\(nvmBase)/\(v)/bin/node"
-                if FileManager.default.isExecutableFile(atPath: nodePath) {
+                if FileManager.default.isExecutableFile(atPath: nodePath) && nodeRuns(nodePath) {
                     logHandler("Using nvm node: \(nodePath)")
                     return nodePath
                 }

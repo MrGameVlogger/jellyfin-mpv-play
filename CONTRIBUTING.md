@@ -65,7 +65,7 @@ jellyfin-mpv-play/
 
 ### macapp/ (Swift)
 
-- macOS 13.0+ minimum deployment target
+- macOS 13.5+ minimum deployment target
 - Uses Cocoa framework (AppKit)
 - `ConfigParser.swift` is the shared utility for config file parsing
 - `processLogLine()` runs on the main thread — keep it fast

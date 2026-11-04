@@ -4,8 +4,10 @@ set -e
 
 # Build against the same minimum macOS the app advertises (Info.plist
 # LSMinimumSystemVersion). Without this, the binary's minimum OS becomes the
-# build machine's SDK default and the app refuses to launch on macOS 13/14.
-export MACOSX_DEPLOYMENT_TARGET=13.0
+# build machine's SDK default and the app refuses to launch on older macOS.
+# 13.5 is also the floor of the bundled Node.js binary (LC_BUILD_VERSION minos)
+# — anything older would launch the app but fail to exec the bundled runtime.
+export MACOSX_DEPLOYMENT_TARGET=13.5
 
 APP_NAME="Jellyfin MPV Play"
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -116,7 +118,7 @@ echo "Node.js bundled: $NODE_DIR/bin/node ($NODE_ARCH)"
 echo "Compiling Swift sources..."
 swiftc \
     -sdk "$(xcrun --show-sdk-path)" \
-    -target "$ARCH-apple-macos13.0" \
+    -target "$ARCH-apple-macos13.5" \
     -framework Cocoa \
     -framework UserNotifications \
     -O \
