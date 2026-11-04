@@ -42,6 +42,12 @@ if [ ! -x "$NODE_BIN" ]; then
     exit 1
 fi
 
+# Node.js 25+ Linux binaries link against libatomic.so.1; the bundle carries a
+# pinned copy in lib/ so minimal distros work without installing it.
+if [ -d "$SCRIPT_DIR/lib" ]; then
+    export LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 MPV_PATH=""
 # Try to read mpvPath from config.js
 if [ -f "$CONFIG_FILE" ]; then

@@ -123,6 +123,31 @@ jobs:
                  "$NAME/node/bin/npx" \
                  "$NAME/node/bin/corepack" 2>/dev/null || true
 
+          # Node.js 25+ official Linux binaries link against libatomic.so.1, which
+          # minimal distros may lack. Bundle a pinned copy so the runtime is fully
+          # self-contained. The lib needs glibc 2.14 symbols only (Node itself needs
+          # 2.28), so it can never be the breaking link. GCC Runtime Library Exception
+          # permits redistribution alongside user programs.
+          LIBATOMIC_URL="http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb"
+          LIBATOMIC_SHA256="fe49cbbc7be753528380c724a8eef5f1e31dffa9221f692c5069048d81c7449d"
+          curl -fsSL --retry 3 --retry-delay 2 "$LIBATOMIC_URL" -o /tmp/libatomic1.deb
+          echo "$LIBATOMIC_SHA256  /tmp/libatomic1.deb" | sha256sum -c -
+          mkdir -p /tmp/libatomic-extract "$NAME/lib"
+          cd /tmp/libatomic-extract && ar x /tmp/libatomic1.deb && tar --zstd -xf data.tar.zst
+          cp usr/lib/x86_64-linux-gnu/libatomic.so.1* "$GITHUB_WORKSPACE/$NAME/lib/"
+          cd "$GITHUB_WORKSPACE"
+          cat > "$NAME/lib/libatomic-LICENSE.txt" <<'EOF'
+          This bundle includes libatomic.so.1 (GCC runtime library, package
+          libatomic1 14.2.0-4ubuntu2~24.04.1 from Ubuntu 24.04).
+
+          Distributed under the GNU General Public License version 3 with the
+          GCC Runtime Library Exception, which permits redistribution alongside
+          user programs without applying the GPL to them.
+
+          Source: https://gcc.gnu.org/git/?p=gcc.git;a=tree;f=libatomic
+          License: https://www.gnu.org/licenses/gcc-exception-3.1.html
+          EOF
+
           cp shim.js package.json config.example.js "$NAME/"
           cp -R node_modules "$NAME/"
           cp -R linux/* "$NAME/"

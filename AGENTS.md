@@ -501,6 +501,7 @@ Use patterns like:
 - `jellyfin-mpv-play.desktop` has Terminal=false (launch.sh handles terminal detection)
 - `jellyfin-mpv-play.service` runs shim as systemd user service (Type=simple, Restart=on-failure)
 - MPV args are minimal — user's `~/.config/mpv/mpv.conf` handles vo, hwdec, ao, cache, etc.
+- Bundle carries its own `libatomic.so.1` in `lib/` (Node.js 25+ Linux binaries link against it; minimal distros may lack it) — `launch.sh` prepends it to `LD_LIBRARY_PATH`, CI fetches a pinned `libatomic1` `.deb` (SHA256-verified) at bundle time. `tests/quality.test.mjs` enforces both halves.
 
 ### Windows (`windows/`)
 

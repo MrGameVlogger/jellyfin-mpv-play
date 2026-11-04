@@ -161,6 +161,24 @@ test('bundled Node.js pin is a single source of truth in .node-version', () => {
   );
 });
 
+test('Linux bundle ships its own libatomic and launch.sh exports LD_LIBRARY_PATH', () => {
+  const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
+  const launchSh = fs.readFileSync('linux/launch.sh', 'utf8');
+
+  assert(
+    workflow.includes('libatomic1_') && workflow.includes('libatomic.so.1'),
+    'build.yml must bundle a pinned libatomic1 into the Linux bundle (Node.js 25+ Linux binaries link against libatomic.so.1)'
+  );
+  assert(
+    /LIBATOMIC_SHA256="[0-9a-f]{64}"/.test(workflow),
+    'the bundled libatomic .deb must be pinned by SHA256'
+  );
+  assert(
+    launchSh.includes('LD_LIBRARY_PATH') && launchSh.includes('"$SCRIPT_DIR/lib"'),
+    'linux/launch.sh must export LD_LIBRARY_PATH pointing at the bundled lib/ dir'
+  );
+});
+
 test('SupportedCommands uses exact Jellyfin enum names', () => {
   const shim = fs.readFileSync('shim.js', 'utf8');
 
