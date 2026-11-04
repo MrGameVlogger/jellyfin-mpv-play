@@ -18,6 +18,21 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.17.0
+
+### Features
+- **Bundled Node.js 26 LTS (26.13.0)** — all three platform bundles now ship the new Active LTS line ("Lithium", supported until April 2029; Node.js 24 dropped to Maintenance LTS in October 2026). No shim code changes were needed: the tree has no native addons (the ABI bump is a no-op), no removed-API usage, and no `fetch()`/undici surface. On minimal Linux distros, install `libatomic1` if `launch.sh` fails with a loader error — Node.js 25+ official Linux binaries link against it (noted in the README).
+
+### Security
+- **follow-redirects 1.16.2** — fixes GHSA-3hfw-x4q4-j9w9 (cross-realm `sensitiveHeaders` disclosure and custom credentials following redirects). The axios 1.21.0 bump alone left the lockfile resolving 1.16.1; the resolution is now explicit.
+- **axios 1.21.0** — routine dependency bump (Dependabot).
+
+### Internal
+- **The bundled Node.js pin now lives in `.node-version`** (single source of truth, read at build time by `macapp/build.sh` and the CI bundles). Previously the pin lived in `build.yml` too, which meant the weekly LTS-bump bot could never open its PR — `GITHUB_TOKEN` is hard-blocked from pushing workflow-file edits.
+- **e2e suite runs as a dedicated Jellyfin test user** (scrobble isolation — suite completions can no longer leak to AniList/MAL), and all env-derived test-user identity is wrapped in `redact()` at the log sinks (closes the remaining CodeQL `js/clear-text-logging` alerts).
+
+---
+
 ## v1.16.1
 
 ### Bug Fixes
