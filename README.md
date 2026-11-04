@@ -401,19 +401,20 @@ See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ### Recent Releases
 
+**v1.17.1** — Linux bundle ships its own libatomic (self-contained on minimal distros again) ([details](CHANGELOG.md#v1171))
+
 **v1.17.0** — Bundled Node.js 26 LTS (26.13.0, supported to Apr 2029); follow-redirects security fix; single-source Node pin ([details](CHANGELOG.md#v1170))
 
 **v1.16.1** — Completed episodes sync to scrobblers again (playedToCompletion contract for jellyfin-ani-sync etc.) ([details](CHANGELOG.md#v1161))
 
 ~~**v1.16.0**~~ — ~~Completed episodes end watched with NO resume position anywhere~~ (fix kept; the stop-report shape broke scrobblers and was corrected in v1.16.1) — stable API key for media URLs; revoked-token recovery; quit crash fix ([details](CHANGELOG.md#v1160))
 
-**v1.15.0** — Bundled Node.js 24 LTS (24.22.1); automated Node.js LTS tracking; pin-lockstep enforcement ([details](CHANGELOG.md#v1150))
-
 
 
 <details>
 <summary><b>Older releases</b></summary>
 
+**v1.15.0** — Bundled Node.js 24 LTS (24.22.1); automated Node.js LTS tracking; pin-lockstep enforcement ([details](CHANGELOG.md#v1150))
 **v1.14.2** — Security: bundled Node.js 22.23.4 (TLS hostname bypass, Brotli RCE, CA removal) ([details](CHANGELOG.md#v1142))
 **v1.14.1** — Security: patched credential-header leak on cross-origin redirects (follow-redirects 1.16.1) ([details](CHANGELOG.md#v1141))
 **v1.14.0** — Stock OSC usability: named playlist entries, external subtitle/audio loading, track-mapping fixes; report-ordering and stale-async race fixes ([details](CHANGELOG.md#v1140))

@@ -18,6 +18,13 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.17.1
+
+### Bug Fixes
+- **Linux bundle is fully self-contained again — no more `libatomic` loader errors on minimal distros.** Node.js 25+ official Linux binaries link against `libatomic.so.1` and refuse to start when the system lacks it (v1.17.0 moved to Node 26 and only documented the caveat). The bundle now ships its own pinned `libatomic.so.1` (35 KB, glibc 2.14 symbols only — it can never be the breaking link since Node itself needs glibc 2.28) and `launch.sh` wires it in via `LD_LIBRARY_PATH`. Shipped under the GCC Runtime Library Exception, license note included in `lib/`. macOS and Windows bundles were unaffected.
+
+---
+
 ## v1.17.0
 
 ### Features
