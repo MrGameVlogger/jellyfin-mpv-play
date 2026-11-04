@@ -18,6 +18,17 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.17.2
+
+### Bug Fixes
+- **macOS: the app now states its real minimum (13.5) and recovers when the bundled Node can't run.** The app advertised macOS 13.0 but the bundled Node.js binary requires 13.5 (true since v1.15.0 — both Node 24 and 26 carry that floor) — on 13.0–13.4 the app launched, picked the bundled runtime, and died at dyld load with a confusing error while the system-node fallback never fired (it only handled a *missing* binary). The floor is now honest (OS refuses cleanly at launch), and the node lookup probes each candidate with a `--version` run before accepting it — falling back to system/nvm node if the bundled one can't execute (also covers architecture mismatches and future runtime floor bumps).
+
+### Internal
+- **Supported-platform matrix documented** — macOS 13.5+ (Apple Silicon release bundle; Intel Macs build from source), Linux x86-64 with glibc 2.28+ (not musl/Alpine), Windows 10 1809+. The macOS FAQ no longer implies Intel users can use the release download.
+- **Quality test drift guard** — `LSMinimumSystemVersion`, `MACOSX_DEPLOYMENT_TARGET`, and the `swiftc -target` floor must all agree.
+
+---
+
 ## v1.17.1
 
 ### Bug Fixes
