@@ -54,7 +54,7 @@
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-.tar.gz-yellow?style=for-the-badge&logo=linux"></a>
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-.zip-blue?style=for-the-badge&logo=windows"></a>
 
-All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. On minimal Linux distros, install `libatomic1` if the bundled runtime fails to start (Node.js 25+ links against it).
+All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. The Linux bundle also carries its own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros.
 
 ---
 
@@ -575,7 +575,7 @@ MIT License — Feel free to use and modify! See [LICENSE](LICENSE).
 A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 26 LTS — no separate installation needed.
 
 **Q: Does this work on Linux?**
-A: Yes. Download the Linux bundle from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases), extract, and run `./launch.sh`. Set `mpvPath` to `/usr/bin/mpv` (or wherever MPV is installed). If `launch.sh` fails with a `libatomic` loader error (possible on minimal distros), install `libatomic1` (`apt install libatomic1`, `dnf install libatomic`, or `pacman -S libatomic` — usually already present).
+A: Yes. Download the Linux bundle from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases), extract, and run `./launch.sh`. Set `mpvPath` to `/usr/bin/mpv` (or wherever MPV is installed). The bundle is self-contained (including `libatomic` for the bundled Node.js). If `launch.sh` still fails with a loader error, make sure the bundle's `lib/` directory is intact and your glibc is 2.28 or newer.
 
 **Q: Can I use this over the internet?**
 A: Yes, if your Jellyfin server is accessible, but LAN is recommended.
