@@ -14,3 +14,4 @@ playback_positions_*.json
 .env
 .node-tmp/
 .node-cache/
+build/
