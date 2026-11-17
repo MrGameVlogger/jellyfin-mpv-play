@@ -87,7 +87,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 - **DisplayMessage**: Shows OSD overlay in MPV, pauses playback for 10s, then resumes. Original pause state tracked globally (`displayMessageOriginalPause`) to handle concurrent messages.
 - **Subtitle sync**: Observes `sid` property. Changes from MPV are reported to Jellyfin via progress API. Changes from Jellyfin are flagged (`isSettingSubtitleFromJellyfin`) to prevent echo. 5s timeout clears the flag if no echo detected.
 - **Headless mode**: `headless: true` in config.js logs to `data/shim-<configname>.log` (writes to both log file and stdout/stderr). On Linux, `launch.sh` auto-detects headless config and runs in background via nohup.
-- **Playable types**: `Episode`, `Movie`, `Video`, `MusicVideo`, `Audio` — anything else is skipped.
+- **Playable types**: `Episode`, `Movie`, `Video`, `MusicVideo`, `Audio`, `AudioBook`, `Trailer` — anything else is skipped (containers like `Series`/`Season`/`BoxSet`, metadata like `Genre`/`Person`, and non-AV like `Photo`/`Book`).
 - **Watched threshold**: Item marked watched at 90% of runtime.
 - **EOF detection**: Observes `eof-reached` property (ID 8). Logs item ID, position, duration, queue index, and whether it's the last item. This is more reliable than the progress poll's position-based check for triggering auto-close.
 - **Reconnection**: hot-probe loop on disconnect — `GET /System/Info` every 1s and connect the moment it answers, so a 5-30s outage costs ~1s of extra gap instead of a backoff slot (up to 30s). WS connect attempts are paced exponentially (1s × 1.5, 30s cap — jellyfin-web SDK shape) so a broken WS endpoint isn't hammered. On reconnect the shim immediately re-reports playback progress so the session reappears with `NowPlayingItem` set.
@@ -154,7 +154,7 @@ mpv's JSON IPC protocol uses different command names than the input.conf system.
 | `add` | Input | `["add", "name", value]` | Adds value to property (e.g. volume) |
 | `cycle` | Input | `["cycle", "name"]` | Cycles property (e.g. fullscreen) |
 | `seek` | Input | `["seek", seconds, "flag"]` | Flags: `absolute`, `relative`, `absolute+keyframes` |
-| `loadfile` | Input | `["loadfile", "url", "flag", index]` | Flags: `replace`, `append`, `insert-at`. Add `+play` to force start (e.g. `append+play`). |
+| `loadfile` | Input | `["loadfile", "url", "flag", index]` | Flags: `replace`, `append`, `insert-at`. Add `+play` to force start (e.g. `append+play` — mpv ≥ 0.42; use `append-play` on older mpv). |
 | `loadlist` | Input | `["loadlist", "url", "flag", index]` | Same flags as `loadfile`; `url` may be a `memory://#EXTM3U` playlist whose `#EXTINF` titles become playlist entry titles + `media-title`. `loadfile` on an M3U URL does NOT preserve titles for `insert-at`/`append` — use `loadlist`. |
 | `sub-add` | Input | `["sub-add", "url", "flags", "title", "lang"]` | Adds an external subtitle stream. Flags: `select`, `auto` (don't hijack selection), `cached`. |
 | `audio-add` | Input | `["audio-add", "url", "flags", "title", "lang"]` | Adds an external audio stream (same shape as `sub-add`). |
