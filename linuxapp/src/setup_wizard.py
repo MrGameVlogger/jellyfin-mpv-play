@@ -20,7 +20,7 @@ class SetupWizardWindow(Gtk.Window):
     TOTAL_STEPS = 5
 
     def __init__(self, config_dir, on_complete=None):
-        super().__init__(title="Welcome to Jellyfin MPV Play")
+        super().__init__(title="Jellyfin MPV Play Setup")
         self.config_dir = config_dir
         self.on_complete = on_complete
         self.did_complete = False
@@ -198,7 +198,7 @@ class SetupWizardWindow(Gtk.Window):
     # -- Step content --------------------------------------------------
 
     def _step_welcome(self):
-        self.title_label.set_markup(self._title("Welcome to Jellyfin MPV Play"))
+        self.title_label.set_markup(self._title("Jellyfin MPV Play"))
         self.subtitle_label.set_markup(
             self._subtitle("Let's get you set up in just a few steps")
         )
@@ -348,7 +348,7 @@ class SetupWizardWindow(Gtk.Window):
         self.container.pack_start(form, False, False, 0)
 
     def _step_finish(self):
-        self.title_label.set_markup(self._title("You're All Set!"))
+        self.title_label.set_markup(self._title("Ready to start"))
         self.subtitle_label.set_markup(self._subtitle("Review and start playing"))
 
         tips = [

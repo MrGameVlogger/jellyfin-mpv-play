@@ -189,7 +189,7 @@ enum ConfigParser {
                     return
                 }
                 if httpResponse.statusCode == 200 {
-                    completion(true, "Connected!")
+                    completion(true, "Connected")
                 } else {
                     completion(false, "Failed: HTTP \(httpResponse.statusCode)")
                 }

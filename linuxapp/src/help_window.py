@@ -65,7 +65,7 @@ class HelpWindow(Gtk.Window):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         key_lbl = Gtk.Label()
         key_lbl.set_markup(
-            '<span font_family="monospace" foreground="#555555">%s</span>'
+            '<span font_family="monospace" foreground="#666666">%s</span>'
             % self._esc(key)
         )
         key_lbl.set_xalign(0)
@@ -89,7 +89,7 @@ class HelpWindow(Gtk.Window):
         self.box.pack_start(q, False, False, 0)
 
         a = Gtk.Label()
-        a.set_markup('<span foreground="#555555">%s</span>' % self._esc(answer))
+        a.set_markup('<span foreground="#666666">%s</span>' % self._esc(answer))
         a.set_xalign(0)
         a.set_line_wrap(True)
         a.set_max_width_chars(54)

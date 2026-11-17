@@ -83,7 +83,7 @@ class AboutWindow:
 
         # --- Copyright ---
         copyright_label = Gtk.Label(
-            label="Copyright \u00a9 2026 MrGameVlogger. MIT License."
+            label="Copyright \u00a9 2026 MrGameVlogger. MIT License"
         )
         copyright_label.set_halign(Gtk.Align.CENTER)
         copyright_label.get_style_context().add_class(Gtk.STYLE_CLASS_DIM_LABEL)

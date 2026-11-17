@@ -27,7 +27,7 @@ class SetupWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Jellyfin MPV Play"
+        window.title = "Jellyfin MPV Play Setup"
         window.center()
         window.isReleasedWhenClosed = false
         self.init(window: window)
@@ -120,7 +120,7 @@ class SetupWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func showWelcomeStep() {
-        titleLabel.stringValue = "Welcome!"
+        titleLabel.stringValue = "Jellyfin MPV Play"
         subtitleLabel.stringValue = "This app lets you control MPV from Jellyfin's web interface.\nLet's get you set up in just a few steps."
         nextButton.title = "Get Started"
 
@@ -265,7 +265,7 @@ class SetupWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func showFinishStep() {
-        titleLabel.stringValue = "You're All Set!"
+        titleLabel.stringValue = "Ready to start"
         subtitleLabel.stringValue = "The app will now connect to your Jellyfin server.\nYou can change these settings anytime from the menu."
         nextButton.title = "Start"
         nextButton.keyEquivalent = "\r"
