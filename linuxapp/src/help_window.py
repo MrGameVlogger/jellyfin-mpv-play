@@ -62,7 +62,9 @@ class HelpWindow(Gtk.Window):
         self.box.pack_start(lbl, False, False, 2)
 
     def _keybind(self, key, desc):
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row = Gtk.Box()
+        row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        row.set_spacing(12)
         key_lbl = Gtk.Label()
         key_lbl.set_markup(
             '<span font_family="monospace" foreground="#666666">%s</span>'

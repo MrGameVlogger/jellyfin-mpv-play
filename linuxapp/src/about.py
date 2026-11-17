@@ -27,7 +27,9 @@ class AboutWindow:
         self.window.set_position(Gtk.WindowPosition.CENTER)
         self.window.connect("delete-event", self._on_delete)
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        vbox = Gtk.Box()
+        vbox.set_orientation(Gtk.Orientation.VERTICAL)
+        vbox.set_spacing(8)
         vbox.set_margin_top(16)
         vbox.set_margin_bottom(16)
         vbox.set_margin_start(20)
@@ -72,7 +74,9 @@ class AboutWindow:
         vbox.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 4)
 
         # --- Link buttons ---
-        links_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        links_box = Gtk.Box()
+        links_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+        links_box.set_spacing(12)
         links_box.set_halign(Gtk.Align.CENTER)
         for label, url in LINKS:
             button = Gtk.LinkButton.new_with_label(url, label)

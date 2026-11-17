@@ -35,7 +35,9 @@ class LogViewerWindow:
         self.window.set_resizable(True)
         self.window.connect("delete-event", self._on_delete)
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        vbox = Gtk.Box()
+        vbox.set_orientation(Gtk.Orientation.VERTICAL)
+        vbox.set_spacing(0)
         self.window.add(vbox)
 
         # --- Log text view in a scrolled window (fills the top area) ---
@@ -65,7 +67,9 @@ class LogViewerWindow:
         self._tag_names[DEFAULT_COLOR] = self.buffer.create_tag(foreground=DEFAULT_COLOR)
 
         # --- Bottom button bar ---
-        bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        bottom = Gtk.Box()
+        bottom.set_orientation(Gtk.Orientation.HORIZONTAL)
+        bottom.set_spacing(6)
         bottom.set_margin_top(6)
         bottom.set_margin_bottom(6)
         bottom.set_margin_start(10)

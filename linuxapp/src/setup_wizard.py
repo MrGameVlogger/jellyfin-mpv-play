@@ -83,7 +83,9 @@ class SetupWizardWindow(Gtk.Window):
         return Gtk.Image.new_from_icon_name("help-about", Gtk.IconSize.DIALOG)
 
     def _build_layout(self):
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer = Gtk.Box()
+        outer.set_orientation(Gtk.Orientation.VERTICAL)
+        outer.set_spacing(8)
         outer.set_margin_top(16)
         outer.set_margin_bottom(16)
         outer.set_margin_start(20)
@@ -91,7 +93,8 @@ class SetupWizardWindow(Gtk.Window):
         self.add(outer)
 
         # Header icon (decorative).
-        icon_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        icon_box = Gtk.Box()
+        icon_box.set_orientation(Gtk.Orientation.HORIZONTAL)
         icon_box.set_halign(Gtk.Align.CENTER)
         icon_box.pack_start(self._load_icon(), False, False, 0)
         outer.pack_start(icon_box, False, False, 0)
@@ -115,7 +118,9 @@ class SetupWizardWindow(Gtk.Window):
         outer.pack_start(self.container, True, True, 12)
 
         # Bottom button row: Skip (left), Back (center), Continue (right).
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row = Gtk.Box()
+        btn_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        btn_row.set_spacing(8)
 
         self.skip_btn = Gtk.Button(label="Skip Setup")
         self.skip_btn.connect("clicked", self._on_skip)
@@ -210,7 +215,9 @@ class SetupWizardWindow(Gtk.Window):
             ("open-menu-symbolic", "Menu bar controls"),
         ]
         for icon, text in features:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row = Gtk.Box()
+            row.set_orientation(Gtk.Orientation.HORIZONTAL)
+            row.set_spacing(12)
             row.set_halign(Gtk.Align.CENTER)
             img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR)
             row.pack_start(img, False, False, 0)
@@ -223,10 +230,14 @@ class SetupWizardWindow(Gtk.Window):
         self.title_label.set_markup(self._title("Connect to Your Server"))
         self.subtitle_label.set_markup(self._subtitle("Enter your Jellyfin server URL"))
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form = Gtk.Box()
+        form.set_orientation(Gtk.Orientation.VERTICAL)
+        form.set_spacing(8)
         form.set_halign(Gtk.Align.CENTER)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row = Gtk.Box()
+        row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        row.set_spacing(8)
         lbl = Gtk.Label(label="Server URL:")
         lbl.set_xalign(1.0)
         lbl.set_width_chars(11)
@@ -255,10 +266,14 @@ class SetupWizardWindow(Gtk.Window):
             self._subtitle("Enter your Jellyfin username and password")
         )
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form = Gtk.Box()
+        form.set_orientation(Gtk.Orientation.VERTICAL)
+        form.set_spacing(8)
         form.set_halign(Gtk.Align.CENTER)
 
-        user_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        user_row = Gtk.Box()
+        user_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        user_row.set_spacing(8)
         ulbl = Gtk.Label(label="Username:")
         ulbl.set_xalign(1.0)
         ulbl.set_width_chars(11)
@@ -269,7 +284,9 @@ class SetupWizardWindow(Gtk.Window):
         user_row.pack_start(self.username_field, True, True, 0)
         form.pack_start(user_row, False, False, 0)
 
-        pass_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        pass_row = Gtk.Box()
+        pass_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        pass_row.set_spacing(8)
         plbl = Gtk.Label(label="Password:")
         plbl.set_xalign(1.0)
         plbl.set_width_chars(11)
@@ -281,7 +298,9 @@ class SetupWizardWindow(Gtk.Window):
         pass_row.pack_start(self.password_field, True, True, 0)
         form.pack_start(pass_row, False, False, 0)
 
-        test_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        test_row = Gtk.Box()
+        test_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        test_row.set_spacing(8)
         self.test_button = Gtk.Button(label="Test Connection")
         self.test_button.connect("clicked", self._on_test_connection)
         test_row.pack_start(self.test_button, False, False, 0)
@@ -297,10 +316,14 @@ class SetupWizardWindow(Gtk.Window):
         self.title_label.set_markup(self._title("Configure MPV"))
         self.subtitle_label.set_markup(self._subtitle("Set up your video player"))
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form = Gtk.Box()
+        form.set_orientation(Gtk.Orientation.VERTICAL)
+        form.set_spacing(8)
         form.set_halign(Gtk.Align.CENTER)
 
-        path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        path_row = Gtk.Box()
+        path_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        path_row.set_spacing(8)
         plbl = Gtk.Label(label="MPV Path:")
         plbl.set_xalign(1.0)
         plbl.set_width_chars(11)
@@ -313,7 +336,9 @@ class SetupWizardWindow(Gtk.Window):
         path_row.pack_start(choose_btn, False, False, 0)
         form.pack_start(path_row, False, False, 0)
 
-        name_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        name_row = Gtk.Box()
+        name_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        name_row.set_spacing(8)
         nlbl = Gtk.Label(label="Device Name:")
         nlbl.set_xalign(1.0)
         nlbl.set_width_chars(11)
@@ -323,7 +348,9 @@ class SetupWizardWindow(Gtk.Window):
         name_row.pack_start(self.device_name_field, True, True, 0)
         form.pack_start(name_row, False, False, 0)
 
-        id_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        id_row = Gtk.Box()
+        id_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        id_row.set_spacing(8)
         ilbl = Gtk.Label(label="Device ID:")
         ilbl.set_xalign(1.0)
         ilbl.set_width_chars(11)
@@ -358,7 +385,9 @@ class SetupWizardWindow(Gtk.Window):
             "Check the Help menu for tips and troubleshooting",
         ]
         for tip in tips:
-            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            card = Gtk.Box()
+            card.set_orientation(Gtk.Orientation.HORIZONTAL)
+            card.set_spacing(10)
             card.get_style_context().add_class("tip-card")
             img = Gtk.Image.new_from_icon_name("emblem-ok-symbolic", Gtk.IconSize.BUTTON)
             card.pack_start(img, False, False, 0)

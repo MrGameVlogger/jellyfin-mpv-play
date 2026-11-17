@@ -69,7 +69,8 @@ class PreferencesWindow(Gtk.Window):
         self.connect("delete-event", self._on_delete)
         self.connect("key-press-event", self._on_key_press)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer = Gtk.Box()
+        outer.set_orientation(Gtk.Orientation.VERTICAL)
         self.add(outer)
 
         scrolled = Gtk.ScrolledWindow()
@@ -93,7 +94,9 @@ class PreferencesWindow(Gtk.Window):
         self._build_options_section()
 
         # Bottom buttons — Save is the default (Return), Cancel is Escape.
-        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        button_row = Gtk.Box()
+        button_row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        button_row.set_spacing(8)
         button_row.set_margin_top(8)
         button_row.set_margin_bottom(12)
         button_row.set_margin_start(16)
@@ -143,7 +146,9 @@ class PreferencesWindow(Gtk.Window):
 
     def _row(self, label_text, widgets):
         """Builds a form row. widgets: list of (widget, expand) tuples."""
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row = Gtk.Box()
+        row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        row.set_spacing(8)
         row.pack_start(self._field_label(label_text), False, False, 0)
         for widget, expand in widgets:
             row.pack_start(widget, expand, expand, 0)
@@ -204,7 +209,9 @@ class PreferencesWindow(Gtk.Window):
         attrs.insert(Pango.AttrFontDesc.new(Pango.FontDescription.from_string("12")))
         self.status_label.set_attributes(attrs)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row = Gtk.Box()
+        row.set_orientation(Gtk.Orientation.HORIZONTAL)
+        row.set_spacing(12)
         row.pack_start(self._field_label(""), False, False, 0)
         row.pack_start(self.test_button, False, False, 0)
         row.pack_start(self.status_label, True, True, 0)
@@ -244,9 +251,15 @@ class PreferencesWindow(Gtk.Window):
     def _build_options_section(self):
         self.form_box.pack_start(self._section_label("Options"), False, False, 0)
 
-        columns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        columns = Gtk.Box()
+        columns.set_orientation(Gtk.Orientation.HORIZONTAL)
+        columns.set_spacing(24)
+        left = Gtk.Box()
+        left.set_orientation(Gtk.Orientation.VERTICAL)
+        left.set_spacing(6)
+        right = Gtk.Box()
+        right.set_orientation(Gtk.Orientation.VERTICAL)
+        right.set_spacing(6)
         columns.pack_start(left, True, True, 0)
         columns.pack_start(right, True, True, 0)
         self.form_box.pack_start(columns, False, False, 0)
@@ -262,7 +275,9 @@ class PreferencesWindow(Gtk.Window):
         skip_label.set_margin_top(6)
         left.pack_start(skip_label, False, False, 0)
 
-        radios = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        radios = Gtk.Box()
+        radios.set_orientation(Gtk.Orientation.HORIZONTAL)
+        radios.set_spacing(12)
         radios.set_margin_start(2)
         self.skip_auto_radio = Gtk.RadioButton.new_with_label(None, "Auto-skip")
         self.skip_prompt_radio = Gtk.RadioButton.new_with_label_from_widget(
