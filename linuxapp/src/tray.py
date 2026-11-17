@@ -4,8 +4,18 @@ Port of macapp/Sources/StatusBarController.swift for Linux/GTK.
 import os
 import gi
 gi.require_version("Gtk", "3.0")
-gi.require_version("AyatanaAppIndicator3", "0.1")
-from gi.repository import Gtk, GLib, Gdk, AyatanaAppIndicator3 as AppIndicator
+
+# Prefer libayatana-appindicator-glib (AyatanaAppIndicatorGlib) over the
+# deprecated libayatana-appindicator (AyatanaAppIndicator3). The glib variant
+# is only packaged on newer distros (Ubuntu 25.10+, Debian 14+), so fall back.
+try:
+    gi.require_version("AyatanaAppIndicatorGlib", "0.1")
+    from gi.repository import AyatanaAppIndicatorGlib as AppIndicator
+except (ValueError, ImportError):
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+    from gi.repository import AyatanaAppIndicator3 as AppIndicator
+
+from gi.repository import Gtk, GLib, Gdk
 
 from node_manager import DISCONNECTED, CONNECTED, PLAYING
 
