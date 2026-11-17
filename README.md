@@ -336,6 +336,7 @@ Set WshShell = Nothing
 | **`MPV closed with error` (exit code 1)** | Invalid `mpvFlags`, missing video driver, or display issue. Test `mpv --idle=yes` manually. Check `~/.config/mpv/mpv.conf` |
 | **`WebSocket error: connect ECONNREFUSED`** | Server unreachable — verify `serverUrl` includes `http://` and port (e.g., `http://192.168.1.100:8096`). Ensure server is running |
 | **`Authentication error: ... 401`** | Wrong credentials — verify `username` and `password` in `config.js` |
+| **HTTPS with self-signed cert — media won't load** | mpv 0.42+ enables TLS verification by default. Add `mpvFlags: ['--tls-verify=no']` to `config.js`, or use `--tls-ca-file=<ca.pem>` for a private CA |
 | **`Token expired, reauthenticating...`** | Normal during reconnection. If repeated, re-enter your credentials |
 | **`IPC error: connect ECONNREFUSED`** | MPV crashed or hasn't started — check `mpvPath`. The shim retries 10 times automatically |
 | **`Maximum IPC connection attempts reached`** | MPV won't start — test `mpv --idle=yes` manually. Check for invalid `mpvFlags` |

@@ -250,7 +250,8 @@ async function resyncQueueFromPlaylist() {
 // construction. Playlist entries are loaded through in-memory M3U playlists
 // because that is the ONLY way mpv will show a name instead of the raw stream
 // URL in its own OSC playlist view — a URL that also carries the ApiKey token.
-// (Verified on mpv 0.41: playlist/N/title is read-only, and per-file
+// (As of mpv 0.42 playlist/N/title is writable, but loadlist #EXTINF titles
+// remain the simplest way to name entries. Per-file
 // force-media-title via loadfile's options argument only lands after the entry
 // has been opened. #EXTINF titles via loadlist populate titles immediately and
 // survive replace/insert-at/append alike — loadfile on an M3U URL does NOT
@@ -1451,7 +1452,16 @@ async function handleMessage(sock, msg) {
             // TimeoutMs argument (when sent) controls how long the message shows.
             const timeoutMs = parseInt(args.TimeoutMs, 10);
             const duration = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 10000;
-            if (displayMessageTimeout) {
+            if (osdRestoreTimeout) {
+                // A skip/error OSD restore is pending — cancel it and fold its
+                // restore target into our originals. Otherwise the pending
+                // restore fires mid-message and stomps the OSD.
+                clearTimeout(osdRestoreTimeout);
+                osdRestoreTimeout = null;
+                displayMessageOriginalFontSize = osdRestoreTarget.size;
+                displayMessageOriginalAlignX = osdRestoreTarget.alignX;
+                displayMessageOriginalAlignY = osdRestoreTarget.alignY;
+            } else if (displayMessageTimeout) {
                 clearTimeout(displayMessageTimeout);
                 displayMessageTimeout = null;
             } else {
@@ -1466,9 +1476,10 @@ async function handleMessage(sock, msg) {
             sendMpvCommand('show-text', [osdText, duration]);
             displayMessageTimeout = setTimeout(() => {
                 displayMessageTimeout = null;
-                sendMpvCommand('set_property', ['osd-font-size', displayMessageOriginalFontSize || 55]);
-                sendMpvCommand('set_property', ['osd-align-x', displayMessageOriginalAlignX || 'center']);
-                sendMpvCommand('set_property', ['osd-align-y', displayMessageOriginalAlignY || 'bottom']);
+                // mpv defaults: osd-font-size=30, osd-align-x=left, osd-align-y=top
+                sendMpvCommand('set_property', ['osd-font-size', displayMessageOriginalFontSize ?? 30]);
+                sendMpvCommand('set_property', ['osd-align-x', displayMessageOriginalAlignX ?? 'left']);
+                sendMpvCommand('set_property', ['osd-align-y', displayMessageOriginalAlignY ?? 'top']);
                 displayMessageOriginalFontSize = null;
                 displayMessageOriginalAlignX = null;
                 displayMessageOriginalAlignY = null;
@@ -1664,7 +1675,7 @@ async function fetchEpisodeInfo(itemId, silent = false) {
     // below. Keep both branches returning this shape so no type is lopsided
     // (e.g. mediaStreams missing for movies broke the OSC track lists and the
     // stream index <-> mpv id mapping fallbacks).
-    const playableTypes = ['Episode', 'Movie', 'Video', 'MusicVideo', 'Audio'];
+    const playableTypes = ['Episode', 'Movie', 'Video', 'MusicVideo', 'Audio', 'AudioBook', 'Trailer'];
     const info = {
         isSeries: false,
         playable: playableTypes.includes(item.Type),
@@ -1799,27 +1810,45 @@ function checkIntroSegment(positionTicks) {
 }
 
 let osdRestoreTimeout = null;
+// Restore target for the pending osdRestoreTimeout — must be module-level so
+// the flush path (when a new OSD supersedes a pending one) can see it. Closures
+// can't reach into each other's saved values.
+let osdRestoreTarget = { size: 30, alignX: 'left', alignY: 'top' };
 
 function showSkipOsd(text) {
-    if (osdRestoreTimeout) { clearTimeout(osdRestoreTimeout); osdRestoreTimeout = null; }
-    const savedSize = displayMessageOriginalFontSize || 55;
-    const savedAlignX = displayMessageOriginalAlignX || 'center';
-    const savedAlignY = displayMessageOriginalAlignY || 'bottom';
-    if (displayMessageTimeout) {
+    // If a previous OSD restore is pending, flush it first. The OSD is now at
+    // osdRestoreTarget — that's the correct restore point for this new message.
+    if (osdRestoreTimeout) {
+        clearTimeout(osdRestoreTimeout);
+        osdRestoreTimeout = null;
+        sendMpvCommand('set_property', ['osd-font-size', osdRestoreTarget.size]);
+        sendMpvCommand('set_property', ['osd-align-x', osdRestoreTarget.alignX]);
+        sendMpvCommand('set_property', ['osd-align-y', osdRestoreTarget.alignY]);
+        // osdRestoreTarget stays — it's where the OSD just landed
+    } else if (displayMessageTimeout) {
+        // DisplayMessage active: its originals are the true pre-message state
         clearTimeout(displayMessageTimeout);
         displayMessageTimeout = null;
+        osdRestoreTarget = {
+            size: displayMessageOriginalFontSize ?? 30,
+            alignX: displayMessageOriginalAlignX ?? 'left',
+            alignY: displayMessageOriginalAlignY ?? 'top'
+        };
         displayMessageOriginalFontSize = null;
         displayMessageOriginalAlignX = null;
         displayMessageOriginalAlignY = null;
+    } else {
+        // No pending OSD — assume mpv defaults
+        osdRestoreTarget = { size: 30, alignX: 'left', alignY: 'top' };
     }
     sendMpvCommand('set_property', ['osd-font-size', 40]);
     sendMpvCommand('set_property', ['osd-align-x', 'right']);
     sendMpvCommand('set_property', ['osd-align-y', 'bottom']);
     sendMpvCommand('show-text', [text, 3000]);
     osdRestoreTimeout = setTimeout(() => {
-        sendMpvCommand('set_property', ['osd-font-size', savedSize]);
-        sendMpvCommand('set_property', ['osd-align-x', savedAlignX]);
-        sendMpvCommand('set_property', ['osd-align-y', savedAlignY]);
+        sendMpvCommand('set_property', ['osd-font-size', osdRestoreTarget.size]);
+        sendMpvCommand('set_property', ['osd-align-x', osdRestoreTarget.alignX]);
+        sendMpvCommand('set_property', ['osd-align-y', osdRestoreTarget.alignY]);
         osdRestoreTimeout = null;
     }, 3100);
 }
@@ -1828,25 +1857,34 @@ function showErrorOsd(text) {
     const now = Date.now();
     if (now - lastErrorOsdTime < 30000) return;
     lastErrorOsdTime = now;
-    if (osdRestoreTimeout) { clearTimeout(osdRestoreTimeout); osdRestoreTimeout = null; }
-    const savedSize = displayMessageOriginalFontSize || 55;
-    const savedAlignX = displayMessageOriginalAlignX || 'center';
-    const savedAlignY = displayMessageOriginalAlignY || 'bottom';
-    if (displayMessageTimeout) {
+    if (osdRestoreTimeout) {
+        clearTimeout(osdRestoreTimeout);
+        osdRestoreTimeout = null;
+        sendMpvCommand('set_property', ['osd-font-size', osdRestoreTarget.size]);
+        sendMpvCommand('set_property', ['osd-align-x', osdRestoreTarget.alignX]);
+        sendMpvCommand('set_property', ['osd-align-y', osdRestoreTarget.alignY]);
+    } else if (displayMessageTimeout) {
         clearTimeout(displayMessageTimeout);
         displayMessageTimeout = null;
+        osdRestoreTarget = {
+            size: displayMessageOriginalFontSize ?? 30,
+            alignX: displayMessageOriginalAlignX ?? 'left',
+            alignY: displayMessageOriginalAlignY ?? 'top'
+        };
         displayMessageOriginalFontSize = null;
         displayMessageOriginalAlignX = null;
         displayMessageOriginalAlignY = null;
+    } else {
+        osdRestoreTarget = { size: 30, alignX: 'left', alignY: 'top' };
     }
     sendMpvCommand('set_property', ['osd-font-size', 35]);
     sendMpvCommand('set_property', ['osd-align-x', 'right']);
     sendMpvCommand('set_property', ['osd-align-y', 'top']);
     sendMpvCommand('show-text', [text, 3000]);
     osdRestoreTimeout = setTimeout(() => {
-        sendMpvCommand('set_property', ['osd-font-size', savedSize]);
-        sendMpvCommand('set_property', ['osd-align-x', savedAlignX]);
-        sendMpvCommand('set_property', ['osd-align-y', savedAlignY]);
+        sendMpvCommand('set_property', ['osd-font-size', osdRestoreTarget.size]);
+        sendMpvCommand('set_property', ['osd-align-x', osdRestoreTarget.alignX]);
+        sendMpvCommand('set_property', ['osd-align-y', osdRestoreTarget.alignY]);
         osdRestoreTimeout = null;
     }, 3100);
 }

@@ -51,6 +51,9 @@ module.exports = {
 
     // Extra MPV flags (optional — array of strings passed to MPV)
     // mpvFlags: ['--hwdec=auto', '--vo=gpu-next'],
+    // If your Jellyfin server uses HTTPS with a self-signed certificate, add
+    // '--tls-verify=no' (mpv 0.42+ enables TLS verification by default):
+    // mpvFlags: ['--tls-verify=no'],
 
     // Headless mode — suppress console output, log to data/shim-<configname>.log (optional — default: false)
     // Useful for running as a background service on Linux/Windows
