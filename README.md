@@ -230,11 +230,11 @@ MPV's native `Media Next` / `Media Previous` keys also work for playlist navigat
 
 A drop-in replacement for [thumbfast](https://github.com/po5/thumbfast) that fetches pre-generated thumbnails from Jellyfin's Trickplay API. Hover over the seekbar to see instant thumbnail previews without local video decoding.
 
-**Requirements:** MPV v0.38+, curl, ffmpeg, Jellyfin server with Trickplay enabled, and a thumbfast-compatible OSC such as [uosc](https://github.com/tomasklaen/uosc), [ModernX](https://github.com/cyl0/ModernX), or the [osc.lua fork](https://github.com/po5/thumbfast/blob/vanilla-osc/player/lua/osc.lua) for the vanilla UI.
+**Requirements:** MPV v0.38+, curl, ffmpeg, Jellyfin server with Trickplay enabled, and a thumbfast-compatible OSC — [uosc](https://github.com/tomasklaen/uosc), [ModernX](https://github.com/cyl0/ModernX), mpv 0.42+'s built-in `osc.lua` (supported natively via the OSC Preview API), or the [osc.lua fork](https://github.com/po5/thumbfast/blob/vanilla-osc/player/lua/osc.lua) for the vanilla UI on older mpv.
 
 **Install:** Download `thumbfast-jellyfin.lua` and place it as `thumbfast.lua` in your MPV scripts directory (`~/.config/mpv/scripts/` on Linux/macOS, `%APPDATA%\mpv\scripts\` on Windows).
 
-### [jf-mpv-osc](https://github.com/iwalton3/jf-mpv-osc) — Jellyfin-Styled Player UI
+### [jf-mpv-osc](https://github.com/MrGameVlogger/jf-mpv-osc) (fork of [iwalton3/jf-mpv-osc](https://github.com/iwalton3/jf-mpv-osc)) — Jellyfin-Styled Player UI
 
 Replaces MPV's default on-screen controller with a Jellyfin-styled UI: Material icons, action sheets for subtitle/audio selection, floating Skip Intro/Skip Credits button, and thumbnail seek previews. The shim automatically detects and integrates with it when installed.
 
@@ -242,7 +242,7 @@ Replaces MPV's default on-screen controller with a Jellyfin-styled UI: Material 
 
 **Install:** Download `trickplay-jf-osc.lua` and place it in your MPV scripts directory. Add `--script=trickplay-jf-osc.lua --osc=no` to your `mpvFlags` in `config.js`.
 
-**Integration level:** The shim supports Tier 0-3 and partial Tier 4 of the [jf-mpv-osc contract](https://github.com/iwalton3/jf-mpv-osc#adoption-tiers):
+**Integration level:** The shim supports Tier 0-3 and partial Tier 4 of the [jf-mpv-osc contract](https://github.com/MrGameVlogger/jf-mpv-osc#adoption-tiers):
 
 | Tier | Feature | Status | Notes |
 |------|---------|--------|-------|
@@ -336,7 +336,7 @@ Set WshShell = Nothing
 | **`MPV closed with error` (exit code 1)** | Invalid `mpvFlags`, missing video driver, or display issue. Test `mpv --idle=yes` manually. Check `~/.config/mpv/mpv.conf` |
 | **`WebSocket error: connect ECONNREFUSED`** | Server unreachable — verify `serverUrl` includes `http://` and port (e.g., `http://192.168.1.100:8096`). Ensure server is running |
 | **`Authentication error: ... 401`** | Wrong credentials — verify `username` and `password` in `config.js` |
-| **HTTPS with self-signed cert — media won't load** | mpv 0.42+ enables TLS verification by default. Add `mpvFlags: ['--tls-verify=no']` to `config.js`, or use `--tls-ca-file=<ca.pem>` for a private CA |
+| **HTTPS with self-signed cert — media won't load** | mpv 0.42+ enables TLS verification by default. Add `mpvFlags: ['--tls-verify=no']` to `config.js`, or use `--tls-ca-file=<ca.pem>` for a private CA. If you use thumbfast-jellyfin thumbnails, also set `tls_verify=no` (or `cacert=<ca.pem>`) in its `script-opts/thumbfast.conf` |
 | **`Token expired, reauthenticating...`** | Normal during reconnection. If repeated, re-enter your credentials |
 | **`IPC error: connect ECONNREFUSED`** | MPV crashed or hasn't started — check `mpvPath`. The shim retries 10 times automatically |
 | **`Maximum IPC connection attempts reached`** | MPV won't start — test `mpv --idle=yes` manually. Check for invalid `mpvFlags` |
