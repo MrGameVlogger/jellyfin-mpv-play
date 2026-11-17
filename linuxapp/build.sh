@@ -43,11 +43,13 @@ cp "$PROJECT_DIR/images/icon-dark.svg" "$BUILD_DIR/resources/" 2>/dev/null || tr
 
 # ── Node.js ────────────────────────────────────────────────────────────
 NODE_VERSION="$(tr -d '[:space:]' < "$PROJECT_DIR/.node-version")"
-ARCH="$(uname -m)"
-case "$ARCH" in
-    x86_64) NODE_ARCH="x64" ;;
-    aarch64|arm64) NODE_ARCH="arm64" ;;
-    *) echo "ERROR: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+
+# Target architecture: --arch x86_64|arm64, or auto-detect from host
+TARGET_ARCH="${1:-$(uname -m)}"
+case "$TARGET_ARCH" in
+    x86_64|amd64) NODE_ARCH="x64"; ARCH_LABEL="x86_64" ;;
+    aarch64|arm64) NODE_ARCH="arm64"; ARCH_LABEL="arm64" ;;
+    *) echo "ERROR: Unsupported architecture: $TARGET_ARCH (use x86_64 or arm64)" >&2; exit 1 ;;
 esac
 
 NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.gz"
@@ -159,9 +161,24 @@ INSTALL
 chmod +x "$BUILD_DIR/install.sh"
 
 echo ""
-echo "Build complete: $BUILD_DIR"
+echo "Build complete ($ARCH_LABEL): $BUILD_DIR"
 echo "  Run directly:    $BUILD_DIR/jellyfin-mpv-play-tray"
 echo "  Install:         $BUILD_DIR/install.sh"
+
+# ── Package ────────────────────────────────────────────────────────────
+if [ "$2" = "--package" ]; then
+    PACKAGE_NAME="JellyfinMPVPlay-Linux-${ARCH_LABEL}"
+    PACKAGE_PATH="$PROJECT_DIR/build/${PACKAGE_NAME}.tar.gz"
+    echo ""
+    echo "Packaging: $PACKAGE_PATH"
+    cd "$PROJECT_DIR/build"
+    rm -f "$PACKAGE_PATH"
+    mv linuxapp "$PACKAGE_NAME"
+    tar czf "$PACKAGE_PATH" "$PACKAGE_NAME"
+    mv "$PACKAGE_NAME" linuxapp
+    echo "  Package: $PACKAGE_PATH"
+    echo "  Size: $(du -h "$PACKAGE_PATH" | cut -f1)"
+fi
 echo ""
 echo "Dependencies (required on target system):"
 echo "  Python 3.8+ with PyGObject, GTK3, AyatanaAppIndicator3"
