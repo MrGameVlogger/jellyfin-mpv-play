@@ -46,6 +46,8 @@ class NodeProcessManager:
         self._stderr_buf = b""
         self._shutdown_completion = None
         self._restart_timer = None
+        self._stdout_thread = None
+        self._stderr_thread = None
 
         # Callbacks (set by the UI layer)
         self.log_handler = None          # fn(line)
@@ -100,8 +102,10 @@ class NodeProcessManager:
             self._log(f"ERROR: Failed to start shim: {e}")
             return
 
-        threading.Thread(target=self._read_stdout, daemon=True).start()
-        threading.Thread(target=self._read_stderr, daemon=True).start()
+        self._stdout_thread = threading.Thread(target=self._read_stdout, daemon=True)
+        self._stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
+        self._stdout_thread.start()
+        self._stderr_thread.start()
         threading.Thread(target=self._watch_process, daemon=True).start()
 
     def stop(self, completion=None):
@@ -171,7 +175,12 @@ class NodeProcessManager:
         if not self.process:
             return
         code = self.process.wait()
-        # Drain remaining output
+        # Wait for reader threads to finish processing remaining output
+        # before draining (avoids concurrent reads from the same pipes).
+        if self._stdout_thread:
+            self._stdout_thread.join(timeout=2)
+        if self._stderr_thread:
+            self._stderr_thread.join(timeout=2)
         self._drain_pipes()
         self._on_process_exit(code)
 

@@ -116,7 +116,7 @@ class AboutWindow:
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_path, 60, 60)
             image.set_from_pixbuf(pixbuf)
         except Exception:
-            image.set_from_stock(Gtk.STOCK_HELP_ABOUT, Gtk.IconSize.DIALOG)
+            image = Gtk.Image.new_from_icon_name("help-about", Gtk.IconSize.DIALOG)
             image.set_pixel_size(60)
         return image
 
