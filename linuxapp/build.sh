@@ -167,7 +167,7 @@ echo "  Install:         $BUILD_DIR/install.sh"
 
 # ── Package ────────────────────────────────────────────────────────────
 if [ "$2" = "--package" ]; then
-    PACKAGE_NAME="JellyfinMPVPlay-Linux-${ARCH_LABEL}"
+    PACKAGE_NAME="JellyfinMPVPlay-Linux-${ARCH_LABEL}-preview"
     PACKAGE_PATH="$PROJECT_DIR/build/${PACKAGE_NAME}.tar.gz"
     echo ""
     echo "Packaging: $PACKAGE_PATH"
