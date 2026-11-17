@@ -91,7 +91,14 @@ echo "Creating launcher..."
 cat > "$BUILD_DIR/jellyfin-mpv-play-tray" << 'LAUNCHER'
 #!/usr/bin/env bash
 # Jellyfin MPV Play Linux tray launcher
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so this works from ~/.local/bin or any link.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 
 # Find Python 3 with GTK3 and AppIndicator support
 for py in python3 python3.11 python3.10 python3.9; do
@@ -137,8 +144,8 @@ chmod +x "$INSTALL_DIR/jellyfin-mpv-play-tray"
 # Symlink launcher
 ln -sf "$INSTALL_DIR/jellyfin-mpv-play-tray" "$BIN_DIR/jellyfin-mpv-play-tray"
 
-# Install desktop entry (fix Exec path)
-sed "s|Exec=jellyfin-mpv-play-tray|Exec=$BIN_DIR/jellyfin-mpv-play-tray|" \
+# Install desktop entry (fix Exec path and set working directory)
+sed "s|Exec=jellyfin-mpv-play-tray|Exec=$BIN_DIR/jellyfin-mpv-play-tray\nPath=$INSTALL_DIR|" \
     "$SCRIPT_DIR/jellyfin-mpv-play.desktop" > "$DESKTOP_DIR/jellyfin-mpv-play.desktop"
 
 # Update desktop database
