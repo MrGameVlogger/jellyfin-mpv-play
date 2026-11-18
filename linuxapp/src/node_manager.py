@@ -274,12 +274,15 @@ class NodeProcessManager:
 
         lower = line.lower()
         if any(x in lower for x in ("error", "fatal")) or "❌" in line or "⚠️" in line:
-            now = time.time()
-            if now - self._last_error_notification_at > 30:
-                self._last_error_notification_at = now
-                if self.notification_handler:
-                    truncated = line[:200] + "…" if len(line) > 200 else line
-                    self.notification_handler("Error", truncated)
+            # Suppress expected IPC/connection errors during shutdown or
+            # when the user initiated a stop (mpv closing resets the socket).
+            if not self.is_stopping_playback and not self.is_shutting_down:
+                now = time.time()
+                if now - self._last_error_notification_at > 30:
+                    self._last_error_notification_at = now
+                    if self.notification_handler:
+                        truncated = line[:200] + "…" if len(line) > 200 else line
+                        self.notification_handler("Error", truncated)
 
         # State transitions (same substring matching as the macOS app)
         if "WebSocket connection established" in line:
