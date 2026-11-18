@@ -2343,7 +2343,15 @@ function connectToMpvIpc(gen) {
         });
 
         sock.on('error', (err) => {
-            log('error', 'ipc', '⚠️ IPC error:', err.message);
+            // Socket drops while stopping/shutting down are expected — mpv is
+            // gone and the socket naturally resets. Not an error.
+            const isExpectedDrop = isStoppingPlayback || isShuttingDown ||
+                (mpvProcess && mpvProcess.exitCode !== null);
+            if (isExpectedDrop) {
+                log('info', 'ipc', `🔌 IPC socket closed: ${err.message}`);
+            } else {
+                log('error', 'ipc', '⚠️ IPC error:', err.message);
+            }
             
             if (connectionAttempts < maxAttempts && mpvProcess && mpvProcess.exitCode === null) {
                 setTimeout(attemptConnection, retryDelay);
