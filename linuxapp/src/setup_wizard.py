@@ -165,17 +165,20 @@ class SetupWizardWindow(Gtk.Window):
             self.step_box.remove(child)
 
     def _capture_fields(self):
-        if self.server_field is not None:
+        # Only read from widgets still attached to the container. Detached
+        # widgets from earlier steps may return stale/empty text and would
+        # overwrite values already captured during those steps.
+        if self.server_field is not None and self.server_field.get_parent() is not None:
             self._server = self.server_field.get_text()
-        if self.username_field is not None:
+        if self.username_field is not None and self.username_field.get_parent() is not None:
             self._username = self.username_field.get_text()
-        if self.password_field is not None:
+        if self.password_field is not None and self.password_field.get_parent() is not None:
             self._password = self.password_field.get_text()
-        if self.mpv_path_field is not None:
+        if self.mpv_path_field is not None and self.mpv_path_field.get_parent() is not None:
             self._mpv_path = self.mpv_path_field.get_text()
-        if self.device_name_field is not None:
+        if self.device_name_field is not None and self.device_name_field.get_parent() is not None:
             self._device_name = self.device_name_field.get_text()
-        if self.device_id_field is not None:
+        if self.device_id_field is not None and self.device_id_field.get_parent() is not None:
             self._device_id = self.device_id_field.get_text()
 
     def _show_step(self, step):
@@ -507,7 +510,9 @@ class SetupWizardWindow(Gtk.Window):
     # -- Persistence ---------------------------------------------------
 
     def save_and_finish(self):
-        self._capture_fields()
+        # Values were captured by _show_step() during the last transition.
+        # Don't call _capture_fields() here — the widgets were detached by
+        # _clear_container() and reading them may return stale/empty values.
         managed_keys = {
             "serverUrl", "username", "password",
             "mpvPath", "deviceName", "deviceId",
