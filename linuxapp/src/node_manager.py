@@ -95,7 +95,7 @@ class NodeProcessManager:
                 cwd=app_support_dir(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env={**os.environ, "NODE_PATH": os.path.join(app_support_dir(), "node_modules")},
+                env={**os.environ, "NODE_PATH": os.path.join(app_support_dir(), "node_modules") + os.pathsep + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "node_modules")},
             )
             self._log(f"Started node shim.js (PID: {self.process.pid})")
         except Exception as e:
@@ -430,14 +430,26 @@ class NodeProcessManager:
     def _setup_app_support(self):
         d = app_support_dir()
         os.makedirs(os.path.join(d, "data"), exist_ok=True)
-        # Copy shim.js and package.json from the project if not present
+        # Copy shim.js and package.json from the bundle if not present.
+        # Bundle layout: <bundle>/src/node_manager.py, <bundle>/shim.js, etc.
+        bundle_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for fname in ("shim.js", "package.json", "config.example.js"):
             dest = os.path.join(d, fname)
             if not os.path.exists(dest):
-                src = os.path.join(os.path.dirname(__file__), "..", "..", fname)
+                src = os.path.join(bundle_dir, fname)
                 if os.path.exists(src):
                     import shutil
                     shutil.copy2(src, dest)
+        # Symlink node_modules so the shim can resolve ws/axios.
+        # (Copying 50MB+ of node_modules is wasteful.)
+        nm_dest = os.path.join(d, "node_modules")
+        nm_src = os.path.join(bundle_dir, "node_modules")
+        if not os.path.exists(nm_dest) and os.path.isdir(nm_src):
+            try:
+                os.symlink(nm_src, nm_dest)
+            except OSError:
+                import shutil
+                shutil.copytree(nm_src, nm_dest)
         # Create config.js from example if absent
         cfg = config_path()
         if not os.path.exists(cfg):
