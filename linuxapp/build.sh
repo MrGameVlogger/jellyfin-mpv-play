@@ -99,6 +99,20 @@ if [ ! -d "$BUILD_DIR/node" ]; then
     rm -rf "$BUILD_DIR/node/lib/node_modules/npm"
     rm -rf "$BUILD_DIR/node/lib/node_modules/corepack"
     rm -f "$BUILD_DIR/node/bin/npm" "$BUILD_DIR/node/bin/npx" "$BUILD_DIR/node/bin/corepack"
+
+    # Bundle libatomic.so.1 (Node 25+ Linux binaries link against it; minimal
+    # distros may lack it). Pinned Ubuntu 24.04 package, SHA256-verified.
+    if [ "$NODE_ARCH" = "x64" ]; then
+        echo "Bundling libatomic..."
+        LIBATOMIC_URL="http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb"
+        LIBATOMIC_SHA256="fe49cbbc7be753528380c724a8eef5f1e31dffa9221f692c5069048d81c7449d"
+        curl -fsSL --retry 3 --retry-delay 2 "$LIBATOMIC_URL" -o "$TMPDIR_NODE/libatomic1.deb"
+        echo "$LIBATOMIC_SHA256  $TMPDIR_NODE/libatomic1.deb" | sha256sum -c -
+        mkdir -p "$TMPDIR_NODE/libatomic-extract" "$BUILD_DIR/lib"
+        cd "$TMPDIR_NODE/libatomic-extract" && ar x "$TMPDIR_NODE/libatomic1.deb" && tar --zstd -xf data.tar.zst
+        cp usr/lib/x86_64-linux-gnu/libatomic.so.1* "$BUILD_DIR/lib/"
+        cd "$TMPDIR_NODE"
+    fi
 fi
 
 # ── Launcher script ────────────────────────────────────────────────────
@@ -121,6 +135,7 @@ for py in python3 python3.11 python3.10 python3.9; do
         if "$py" -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk" 2>/dev/null; then
             export PYTHONPATH="$DIR/src:$PYTHONPATH"
             export NODE_PATH="$DIR/node_modules:$NODE_PATH"
+            export LD_LIBRARY_PATH="$DIR/lib:$LD_LIBRARY_PATH"
             cd "$DIR"
             exec "$py" "$DIR/src/main.py" "$@"
         fi

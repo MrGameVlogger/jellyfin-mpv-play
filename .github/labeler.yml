@@ -12,6 +12,7 @@ shim:
     - any-glob-to-any-file:
       - 'shim.js'
       - 'config.example.js'
+      - 'tests/**'
 
 documentation:
   - changed-files:

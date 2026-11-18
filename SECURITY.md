@@ -31,5 +31,5 @@ If you find a security issue, please report it privately:
 
 - `config.js` contains your Jellyfin password in plain text — never share it
 - The app connects to your local Jellyfin server over HTTP/HTTPS
-- The Unix socket at `/tmp/mpv-ipc.sock` is world-readable by default
+- The Unix socket at `/tmp/mpv-ipc.sock` (macOS) or `$XDG_RUNTIME_DIR/mpv-ipc.sock` (Linux, user-private) — set `ipcSocketPath` to customize
 - The app is not sandboxed (it spawns child processes and connects to network)

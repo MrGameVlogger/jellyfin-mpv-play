@@ -97,10 +97,7 @@ fi
 
 # Install systemd service
 if [ "$1" = "--install-service" ]; then
-    SERVICE_FILE="$SCRIPT_DIR/linux/jellyfin-mpv-play.service"
-    if [ ! -f "$SERVICE_FILE" ]; then
-        SERVICE_FILE="$SCRIPT_DIR/jellyfin-mpv-play.service"
-    fi
+    SERVICE_FILE="$SCRIPT_DIR/jellyfin-mpv-play.service"
     if [ ! -f "$SERVICE_FILE" ]; then
         echo "ERROR: Service file not found at $SERVICE_FILE" >&2
         exit 1
