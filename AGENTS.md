@@ -69,9 +69,9 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `linuxapp/src/*.py` | Native Linux system tray app (10 files, Python/GTK3) |
 | `linuxapp/build.sh` | Build script: bundles Node.js + shim + Python, creates launcher + installer |
 | `linuxapp/jellyfin-mpv-play.desktop` | Desktop entry for application menus |
-| `linux/launch.sh` | Smart launcher: detects headless config, manages systemd service |
-| `linux/jellyfin-mpv-play.desktop` | Desktop entry with actions (Launch, Headless, Quit) |
-| `linux/jellyfin-mpv-play.service` | Systemd user service for headless mode |
+| `linuxapp/headless/launch.sh` | Smart launcher: detects headless config, manages systemd service |
+| `linuxapp/headless/jellyfin-mpv-play.desktop` | Desktop entry with actions (Launch, Headless, Quit) |
+| `linuxapp/headless/jellyfin-mpv-play.service` | Systemd user service for headless mode |
 | `windows/launch.bat` | Windows launcher with `--headless` flag support |
 | `.github/workflows/build.yml` | CI: tag-triggered, builds 3 platforms, creates GitHub Release |
 | `.github/workflows/node-lts-bump.yml` | Weekly check of the bundled Node.js pin against the latest LTS; opens a bump PR (same major) or an evaluation issue (new LTS major) |
@@ -519,7 +519,7 @@ Use patterns like:
 - Desktop entry `Icon=` with an absolute path is more reliable than icon-theme lookup.
 - Always overwrite managed files (`shim.js`, `package.json`) on startup — the macOS app's `setupApplicationSupport` pattern. Only `config.js` is user data.
 
-**Legacy launcher (`linux/`):**
+**Legacy launcher (`linuxapp/headless/`):**
 - `launch.sh` detects headless config via node (`require(config).headless`), re-opens terminal if needed
 - `--install-service` / `--uninstall-service` manages systemd user service
 - `jellyfin-mpv-play.desktop` has Terminal=false (launch.sh handles terminal detection)
@@ -853,7 +853,7 @@ Read EVERY file completely. Do not skip or summarize. Check for:
 - Architecture handling
 - Missing error messages
 
-**linux/launch.sh:**
+**linuxapp/headless/launch.sh:**
 - Symlink resolution
 - Error handling (set -e interactions)
 - Exit codes on signals
@@ -864,7 +864,7 @@ Read EVERY file completely. Do not skip or summarize. Check for:
 - Error handling
 - Line endings (should be CRLF)
 
-**linux/jellyfin-mpv-play.desktop:**
+**linuxapp/headless/jellyfin-mpv-play.desktop:**
 - Exec line correctness (test with $0 = _)
 - Icon reference
 - Spec compliance (Version field, Categories)

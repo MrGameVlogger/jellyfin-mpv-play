@@ -197,7 +197,7 @@ echo "  Install:         $BUILD_DIR/install.sh"
 # ── Package ────────────────────────────────────────────────────────────
 if [ "$DO_PACKAGE" = true ]; then
     APP_VERSION="$(node -p "require('$PROJECT_DIR/package.json').version" 2>/dev/null || echo "preview")"
-    PACKAGE_NAME="JellyfinMPVPlay-Linux-${ARCH_LABEL}-v${APP_VERSION}"
+    PACKAGE_NAME="JellyfinMPVPlay-Linux-Tray-${ARCH_LABEL}-v${APP_VERSION}"
     PACKAGE_PATH="$PROJECT_DIR/build/${PACKAGE_NAME}.tar.gz"
     echo ""
     echo "Packaging: $PACKAGE_PATH"

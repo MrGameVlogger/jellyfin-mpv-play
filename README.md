@@ -378,13 +378,10 @@ jellyfin-mpv-play/
 │   └── Info.plist           #   App metadata
 ├── linuxapp/                # Native Linux tray app
 │   ├── src/                 #   Python/GTK3 source files
+│   ├── headless/            #   Headless launcher + systemd service
 │   ├── build.sh             #   Build script (bundles Node.js + shim + Python)
 │   ├── resources/           #   App icons (SVG)
 │   └── jellyfin-mpv-play.desktop  # Desktop entry template
-├── linux/                   # Linux bundle launcher (headless)
-│   ├── launch.sh            #   Launcher script (--headless, --install-service)
-│   ├── jellyfin-mpv-play.service  #   Systemd user service
-│   └── jellyfin-mpv-play.desktop  #   Desktop integration
 ├── windows/                 # Windows bundle launcher
 │   └── launch.bat           #   Launcher script
 ├── images/                  # Logo SVGs and screenshots
