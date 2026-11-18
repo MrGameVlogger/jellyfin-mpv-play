@@ -78,7 +78,9 @@ class PreferencesWindow(Gtk.Window):
         scrolled.set_vexpand(True)
         outer.pack_start(scrolled, True, True, 0)
 
-        self.form_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.form_box = Gtk.Box()
+        self.form_box.set_orientation(Gtk.Orientation.VERTICAL)
+        self.form_box.set_spacing(10)
         self.form_box.set_margin_top(14)
         self.form_box.set_margin_bottom(14)
         self.form_box.set_margin_start(16)

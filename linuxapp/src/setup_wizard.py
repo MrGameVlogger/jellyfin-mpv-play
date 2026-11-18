@@ -114,7 +114,9 @@ class SetupWizardWindow(Gtk.Window):
         outer.pack_start(self.subtitle_label, False, False, 0)
 
         # Middle container whose content is swapped per step.
-        self.container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.container = Gtk.Box()
+        self.container.set_orientation(Gtk.Orientation.VERTICAL)
+        self.container.set_spacing(10)
         outer.pack_start(self.container, True, True, 12)
 
         # Bottom button row: Skip (left), Back (center), Continue (right).

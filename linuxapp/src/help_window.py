@@ -19,7 +19,9 @@ class HelpWindow(Gtk.Window):
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.add(scrolled)
 
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.box = Gtk.Box()
+        self.box.set_orientation(Gtk.Orientation.VERTICAL)
+        self.box.set_spacing(6)
         self.box.set_margin_top(16)
         self.box.set_margin_bottom(16)
         self.box.set_margin_start(20)
