@@ -420,18 +420,20 @@ See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ### Recent Releases
 
+**v1.18.1** — Fixed arm64 Linux tray bundle missing libatomic (self-contained on minimal distros) ([details](CHANGELOG.md#v1181))
+
 **v1.18.0** — Linux tray application, OSD reset fix, AudioBook/Trailer playback, security fixes (ws, axios) ([details](CHANGELOG.md#v1180))
 
 **v1.17.2** — macOS: honest 13.5 floor + node probe/fallback; supported-platform matrix ([details](CHANGELOG.md#v1172))
 
 **v1.17.1** — Linux bundle ships its own libatomic (self-contained on minimal distros again) ([details](CHANGELOG.md#v1171))
 
-**v1.17.0** — Bundled Node.js 26 LTS (26.13.0, supported to Apr 2029); follow-redirects security fix; single-source Node pin ([details](CHANGELOG.md#v1170))
-
 
 
 <details>
 <summary><b>Older releases</b></summary>
+
+**v1.17.0** — Bundled Node.js 26 LTS (26.13.0, supported to Apr 2029); follow-redirects security fix; single-source Node pin ([details](CHANGELOG.md#v1170))
 
 **v1.16.1** — Completed episodes sync to scrobblers again (playedToCompletion contract for jellyfin-ani-sync etc.) ([details](CHANGELOG.md#v1161))
 
