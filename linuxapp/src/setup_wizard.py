@@ -542,6 +542,7 @@ class SetupWizardWindow(Gtk.Window):
             os.makedirs(self.config_dir, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(config)
+            os.chmod(path, 0o600)
         except OSError as exc:
             self._alert("Failed to save config", str(exc))
             return
