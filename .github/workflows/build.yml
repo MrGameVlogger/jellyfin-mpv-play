@@ -257,8 +257,32 @@ jobs:
           name: macos-bundle
           path: ${{ env.BUNDLE }}
 
+  build-linux-tray:
+    needs: [get-version, generate-notes]
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build tray app bundle
+        run: |
+          cd linuxapp
+          bash build.sh ${{ matrix.arch }} --package
+          cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-tray-${{ matrix.arch }}
+          path: build/JellyfinMPVPlay-Linux-*-${{ matrix.arch }}-*.tar.gz
+
   release:
-    needs: [get-version, build-linux, build-windows, build-macos]
+    needs: [get-version, build-linux, build-linux-tray, build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -291,7 +315,7 @@ jobs:
           fi
 
           # Prepend Downloads table
-          DOWNLOADS="### Downloads\n| Platform | File |\n|----------|------|\n| macOS | \`JellyfinMPVPlay-macOS-v${VERSION}.zip\` |\n| Linux | \`JellyfinMPVPlay-Linux-v${VERSION}.tar.gz\` |\n| Windows | \`JellyfinMPVPlay-Windows-v${VERSION}.zip\` |\n"
+          DOWNLOADS="### Downloads\n| Platform | File |\n|----------|------|\n| macOS | \`JellyfinMPVPlay-macOS-v${VERSION}.zip\` |\n| Linux (tray app, x86_64) | \`JellyfinMPVPlay-Linux-x86_64-v${VERSION}.tar.gz\` |\n| Linux (tray app, arm64) | \`JellyfinMPVPlay-Linux-arm64-v${VERSION}.tar.gz\` |\n| Linux (headless) | \`JellyfinMPVPlay-Linux-v${VERSION}.tar.gz\` |\n| Windows | \`JellyfinMPVPlay-Windows-v${VERSION}.zip\` |\n"
           echo -e "$DOWNLOADS" > /tmp/downloads.md
           cat notes.md >> /tmp/downloads.md
           mv /tmp/downloads.md notes.md
@@ -302,7 +326,9 @@ jobs:
             echo "### Quick Start"
             echo "**macOS:** Unzip, move to Applications, launch. The setup wizard will guide you."
             echo ""
-            echo "**Linux:** Extract, edit \`config.js\`, run \`./launch.sh\`. See the included \`.desktop\` file for app launcher integration."
+            echo "**Linux (tray app):** Extract, run \`./install.sh\`, launch from your app menu. See the README for dependency install commands."
+            echo ""
+            echo "**Linux (headless):** Extract, edit \`config.js\`, run \`./launch.sh\`."
             echo ""
             echo "**Windows:** Extract, edit \`config.js\`, run \`launch.bat\`."
             echo ""
