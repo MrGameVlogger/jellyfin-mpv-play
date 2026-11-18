@@ -148,23 +148,20 @@ chmod +x "$INSTALL_DIR/jellyfin-mpv-play-tray"
 # Symlink launcher
 ln -sf "$INSTALL_DIR/jellyfin-mpv-play-tray" "$BIN_DIR/jellyfin-mpv-play-tray"
 
-# Install icon into the hicolor theme so the desktop entry can find it
-ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
-mkdir -p "$ICON_DIR"
+# Install icon and use absolute path in desktop entry (avoids icon-theme lookup)
+ICON_DIR="$INSTALL_DIR/resources"
 if [ -f "$SCRIPT_DIR/resources/icon-light.svg" ]; then
-    cp "$SCRIPT_DIR/resources/icon-light.svg" "$ICON_DIR/jellyfin-mpv-play.svg"
+    cp "$SCRIPT_DIR/resources/icon-light.svg" "$ICON_DIR/"
 fi
 
-# Install desktop entry (fix Exec path and set working directory)
-sed "s|Exec=jellyfin-mpv-play-tray|Exec=$BIN_DIR/jellyfin-mpv-play-tray\nPath=$INSTALL_DIR|" \
+# Install desktop entry (absolute Exec and Icon paths, set working directory)
+sed -e "s|Exec=jellyfin-mpv-play-tray|Exec=$BIN_DIR/jellyfin-mpv-play-tray\nPath=$INSTALL_DIR|" \
+    -e "s|Icon=jellyfin-mpv-play|Icon=$ICON_DIR/icon-light.svg|" \
     "$SCRIPT_DIR/jellyfin-mpv-play.desktop" > "$DESKTOP_DIR/jellyfin-mpv-play.desktop"
 
-# Update desktop database and icon cache
+# Update desktop database
 if command -v update-desktop-database &>/dev/null; then
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
-fi
-if command -v gtk-update-icon-cache &>/dev/null; then
-    gtk-update-icon-cache "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 fi
 
 echo ""
