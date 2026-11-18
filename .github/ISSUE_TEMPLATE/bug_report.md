@@ -31,7 +31,7 @@ OS version:
 <!-- What actually happened. -->
 
 **Logs**
-<!-- If on macOS, menu bar → Show Logs → Export. Otherwise check terminal output. -->
+<!-- macOS: menu bar → Show Logs → Export. Linux tray app: tray menu → Show Logs → Export. Otherwise check terminal output. -->
 ```
 Paste logs here
 ```
