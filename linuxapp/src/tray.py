@@ -29,11 +29,6 @@ class TrayController:
         self.is_paused_state = False
         self.connection_state = DISCONNECTED
 
-        # Windows (lazy-created)
-        self._preferences = None
-        self._about = None
-        self._help = None
-
         # Callbacks set by main
         self.on_show_preferences = None
         self.on_show_about = None

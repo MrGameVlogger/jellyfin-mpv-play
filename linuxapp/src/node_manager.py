@@ -2,11 +2,8 @@
 Port of macapp/Sources/NodeProcessManager.swift for Linux/GTK.
 """
 import os
-import re
 import glob
-import json
 import time
-import signal
 import socket
 import subprocess
 import threading

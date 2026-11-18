@@ -40,24 +40,12 @@ MANAGED_KEYS = {
     "verbose",
 }
 
-STATUS_COLORS = {
-    "green": "#2e7d32",
-    "red": "#c62828",
-    "yellow": "#b8860b",
-}
-
 _STATUS_CSS = """
 .status-green  { color: #2e7d32; }
 .status-red    { color: #c62828; }
 .status-yellow { color: #b8860b; }
 """
 
-
-
-def _rgba(spec):
-    color = Gdk.RGBA()
-    color.parse(spec)
-    return color
 
 
 class PreferencesWindow(Gtk.Window):

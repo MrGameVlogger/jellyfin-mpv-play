@@ -1,7 +1,6 @@
 """Desktop notifications via libnotify.
 Port of macapp/Sources/NotificationManager.swift for Linux/GTK.
 """
-import os
 
 try:
     import gi

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build script for Jellyfin MPV Play Linux tray application.
 # Creates a self-contained bundle with Python source, shim.js, Node.js, and node_modules.
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -133,13 +133,13 @@ cat > "$BUILD_DIR/install.sh" << 'INSTALL'
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$HOME/.local/share/jellyfin-mpv-play-tray"
-BIN_DIR="$HOME/.local/bin"
-DESKTOP_DIR="$HOME/.local/share/applications"
-AUTOSTART_DIR="$HOME/.config/autostart"
+INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/jellyfin-mpv-play-tray"
+BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 
 echo "Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR"
+mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" "$AUTOSTART_DIR"
 
 # Copy bundle
 cp -R "$SCRIPT_DIR"/* "$INSTALL_DIR/"

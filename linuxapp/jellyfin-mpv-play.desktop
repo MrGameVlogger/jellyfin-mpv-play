@@ -6,6 +6,7 @@ Comment=Jellyfin media playback with MPV from the system tray
 Exec=jellyfin-mpv-play-tray
 Icon=jellyfin-mpv-play
 Terminal=false
+StartupWMClass=jellyfin-mpv-play-tray
 Categories=AudioVideo;Audio;Video;Player;
 Keywords=jellyfin;mpv;media;player;video;music;
 StartupNotify=false

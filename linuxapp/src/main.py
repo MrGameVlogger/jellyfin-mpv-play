@@ -2,7 +2,6 @@
 """Jellyfin MPV Play — Linux tray application.
 Port of the macOS menubar app for Linux using GTK3 + AyatanaAppIndicator3.
 """
-import os
 import sys
 import signal
 
@@ -14,6 +13,7 @@ from config_parser import (
     app_support_dir,
     config_path,
     extract_value,
+    selected_config_file_name,
 )
 from node_manager import NodeProcessManager
 from tray import TrayController
@@ -56,7 +56,7 @@ class App:
 
     def _needs_setup(self):
         try:
-            with open(config_path()) as f:
+            with open(config_path(selected_config_file_name())) as f:
                 text = f.read()
             return not (
                 extract_value(text, "serverUrl")
@@ -104,7 +104,7 @@ class App:
 
     def _quit(self):
         def _done():
-            Gtk.main_quit()
+            GLib.idle_add(Gtk.main_quit)
 
         if self.node_manager.is_playing:
             dialog = Gtk.MessageDialog(
