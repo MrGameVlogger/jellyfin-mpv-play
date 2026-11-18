@@ -45,14 +45,14 @@ def settings_path() -> str:
 
 def _load_settings():
     try:
-        with open(settings_path()) as f:
+        with open(settings_path(), encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
 def _save_settings(settings):
-    with open(settings_path(), "w") as f:
+    with open(settings_path(), "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
 
 

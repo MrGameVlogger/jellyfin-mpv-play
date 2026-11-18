@@ -36,6 +36,9 @@ console.log(`🗂️  Using config: ${path.basename(configPath)}`);
 
 const pkg = require('./package.json');
 
+// Jellyfin time is in 100ns ticks — 10,000,000 ticks per second
+const TICKS_PER_SECOND = 10000000;
+
 const CONFIG = {
     serverUrl: userConfig.serverUrl,
     username: userConfig.username,
@@ -808,7 +811,7 @@ function savePlaybackPosition(itemId, positionTicks) {
             lastUpdated: new Date().toISOString()
         };
         fs.writeFileSync(POSITIONS_FILE, JSON.stringify(positions, null, 2));
-        log('info', 'position', `💾 Position saved locally: ${(positionTicks / 10000000).toFixed(2)}s for ${itemId}`);
+        log('info', 'position', `💾 Position saved locally: ${(positionTicks / TICKS_PER_SECOND).toFixed(2)}s for ${itemId}`);
     } catch (error) {
         log('error', 'position', '⚠️ Error saving position:', error.message);
     }
@@ -938,7 +941,7 @@ function connectSocket(sock) {
                 // controls show correct state the moment the session reappears.
                 if (currentItemId && mpvProcess) {
                     try {
-                        const posTicks = Math.round((currentPositionSeconds || 0) * 10000000);
+                        const posTicks = Math.round((currentPositionSeconds || 0) * TICKS_PER_SECOND);
                         reportPlaybackProgress(currentItemId, posTicks);
                     } catch (e) {}
                 }
@@ -1220,7 +1223,7 @@ async function handleMessage(sock, msg) {
                 if (startPosition === 0) {
                     log('info', 'handler', '🎯 Playing from beginning');
                 } else {
-                    log('info', 'handler', `🎯 Resume position from server: ${(startPosition / 10000000).toFixed(2)}s`);
+                    log('info', 'handler', `🎯 Resume position from server: ${(startPosition / TICKS_PER_SECOND).toFixed(2)}s`);
                 }
             } else {
                 log('info', 'handler', '🎯 No start position in message, playing from beginning');
@@ -1365,7 +1368,7 @@ async function handleMessage(sock, msg) {
                 if (!isUnwatchedQuit && isItemCompleted(currentItemId, currentPositionSeconds)) {
                     markItemAsWatched(currentItemId);
                 }
-                reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+                reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
             }
             killMpv();
         } else if (command === 'Pause') {
@@ -1380,7 +1383,7 @@ async function handleMessage(sock, msg) {
             playPreviousEpisode();
         } else if (command === 'Seek') {
             if (data.SeekPositionTicks !== undefined) {
-                const seekSeconds = data.SeekPositionTicks / 10000000;
+                const seekSeconds = data.SeekPositionTicks / TICKS_PER_SECOND;
                 sendMpvCommand('seek', [seekSeconds, 'absolute+keyframes']);
                 log('info', 'handler', `⏩ Seek requested to ${seekSeconds.toFixed(2)}s`);
                 currentPositionSeconds = seekSeconds;
@@ -1544,7 +1547,7 @@ async function handleMessage(sock, msg) {
                 break;
             case 'Seek':
                 if (data.StartPositionTicks !== undefined) {
-                    const seekSeconds = data.StartPositionTicks / 10000000;
+                    const seekSeconds = data.StartPositionTicks / TICKS_PER_SECOND;
                     sendMpvCommand('seek', [seekSeconds, 'absolute']);
                 }
                 break;
@@ -1610,7 +1613,7 @@ async function handleMessage(sock, msg) {
                 } else if (stateType === 'ReadyToPlay') {
                     // Ready to resume — seek to the specified position
                     const positionTicks = stateData.PositionTicks || 0;
-                    const positionSeconds = positionTicks / 10000000;
+                    const positionSeconds = positionTicks / TICKS_PER_SECOND;
                     log('info', 'syncplay', `SyncPlay ready, seeking to ${positionSeconds.toFixed(1)}s`);
                     sendMpvCommand('seek', [positionSeconds, 'absolute']);
                     sendMpvCommand('set_property', ['pause', false]);
@@ -1684,7 +1687,7 @@ async function fetchEpisodeInfo(itemId, silent = false) {
         playable: playableTypes.includes(item.Type),
         type: item.Type,
         title: item.Name || 'Movie/Music',
-        itemRuntime: item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0,
+        itemRuntime: item.RunTimeTicks ? item.RunTimeTicks / TICKS_PER_SECOND : 0,
         userData: item.UserData || {},
         mediaStreams: item.MediaStreams || []
     };
@@ -1767,10 +1770,10 @@ async function getIntroSegments(itemId) {
 }
 
 function skipIntro() {
-    const posTicks = Math.round(currentPositionSeconds * 10000000);
+    const posTicks = Math.round(currentPositionSeconds * TICKS_PER_SECOND);
     const segment = introSegments.find(seg => posTicks >= seg.startTicks && posTicks <= seg.endTicks);
     if (segment) {
-        const seekTo = segment.endTicks / 10000000;
+        const seekTo = segment.endTicks / TICKS_PER_SECOND;
         log('info', 'segments', `⏩ Skipping ${segment.type} segment (seeking to ${seekTo.toFixed(2)}s)`);
         sendMpvCommand('seek', [seekTo, 'absolute+keyframes']);
         currentPositionSeconds = seekTo;
@@ -1904,12 +1907,12 @@ async function loadNewQueue(itemId, startTicks) {
         if (isItemCompleted(currentItemId, currentPositionSeconds)) {
             markItemAsWatched(currentItemId);
         }
-        reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
     }
     isNewQueueLoad = true;
 
     currentItemId = itemId;
-    currentPositionSeconds = startTicks / 10000000;
+    currentPositionSeconds = startTicks / TICKS_PER_SECOND;
     pendingStartSeconds = 0;
 
     try {
@@ -1999,7 +2002,7 @@ async function loadNewQueue(itemId, startTicks) {
     }
 
     if (startTicks > 0) {
-        pendingStartSeconds = startTicks / 10000000;
+        pendingStartSeconds = startTicks / TICKS_PER_SECOND;
     }
 
     // Restore saved indices for reportPlaybackStart
@@ -2016,7 +2019,7 @@ async function loadNewQueue(itemId, startTicks) {
 async function playMedia(itemId, startTicks) {
     invalidateFileGeneration(); // stale file continuations die with this navigation
     if (currentItemId && !isReportingStop) {
-        reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
     }
     killMpv();
     
@@ -2024,7 +2027,7 @@ async function playMedia(itemId, startTicks) {
     const gen = playbackGeneration;
 
     currentItemId = itemId;
-    currentPositionSeconds = startTicks / 10000000;
+    currentPositionSeconds = startTicks / TICKS_PER_SECOND;
     currentEpisodeInfo = await getEpisodeInfo(itemId);
     await getIntroSegments(itemId);
 
@@ -2048,7 +2051,7 @@ async function playMedia(itemId, startTicks) {
     playSessionId = crypto.randomUUID();
 
     pendingStreamUrl = `${CONFIG.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${mediaApiKey()}`;
-    pendingStartSeconds = startTicks / 10000000;
+    pendingStartSeconds = startTicks / TICKS_PER_SECOND;
 
     log('info', 'mpv', '🍿 Launching MPV (Idle Mode)...');
     log('info', 'mpv', `    Item ID: ${itemId}`);
@@ -2171,11 +2174,11 @@ async function playMedia(itemId, startTicks) {
                 // re-saving here used to put it right back.
                 const completed = isItemCompleted(currentItemId, currentPositionSeconds);
                 if (currentItemId && currentPositionSeconds > 0 && !completed) {
-                    const positionTicks = Math.round(currentPositionSeconds * 10000000);
+                    const positionTicks = Math.round(currentPositionSeconds * TICKS_PER_SECOND);
                     savePlaybackPosition(currentItemId, positionTicks);
                 }
                 if (currentItemId && !isReportingStop) {
-                    reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+                    reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
                 }
             }
             // Mark watched independently of the stop-report guard: the Stop command
@@ -2364,7 +2367,7 @@ function connectToMpvIpc(gen) {
             } else if (connectionAttempts >= maxAttempts) {
                 log('error', 'ipc', '❌ Maximum IPC connection attempts reached');
                 if (currentItemId && !isReportingStop) {
-                    reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+                    reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
                 }
                 killMpv();
             }
@@ -2542,7 +2545,7 @@ function startProgressPoll() {
             currentDuration = 0;
         }
         if (introSegments.length > 0) {
-            checkIntroSegment(Math.round(currentPositionSeconds * 10000000));
+            checkIntroSegment(Math.round(currentPositionSeconds * TICKS_PER_SECOND));
         }
         if (!nextUpShown && !isMpvPaused && currentDuration > 0 && currentPositionSeconds >= currentDuration - 10 && currentEpisodeInfo?.nextEpisode) {
             nextUpShown = true;
@@ -2556,7 +2559,7 @@ function startProgressPoll() {
             if (isLastInPlaylist) {
                 log('info', 'queue', `🎬 Near end of last item (${currentPositionSeconds.toFixed(1)}s / ${currentDuration.toFixed(1)}s), querying NextUp`);
                 markItemAsWatched(currentItemId);
-                reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+                reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
                 playNextEpisode();
             }
         }
@@ -2653,7 +2656,7 @@ function handleMpvEvent(event) {
         // that just completed, and the log line lies about what happened.
         if (isStoppingPlayback || isReportingStop) return;
         log('info', 'mpv', event.data ? '⏸️ Playback paused' : '▶️ Playback resumed');
-        if (currentItemId) reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        if (currentItemId) reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
         return;
     }
 
@@ -2723,13 +2726,13 @@ function handleMpvEvent(event) {
         if (currentItemId) {
             const sid = event.data;
             log('info', 'mpv', `🔤 Subtitle changed in MPV: track ${sid}`);
-            reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * 10000000));
+            reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
         }
         return;
     }
 
     if (event.event === 'property-change' && event.name === 'seeking' && event.data === false) {
-        if (currentItemId) reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        if (currentItemId) reportPlaybackProgress(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
         return;
     }
 
@@ -2759,7 +2762,7 @@ function handleMpvEvent(event) {
                     if (isItemCompleted(prevItemId, prevPos)) {
                         markItemAsWatched(prevItemId);
                     }
-                    reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
+                    reportPlaybackStop(prevItemId, Math.round(prevPos * TICKS_PER_SECOND));
                 }
                 stopProgressPoll();
 
@@ -2811,7 +2814,7 @@ function handleMpvEvent(event) {
             // and stop at 0 ticks — reportPlaybackStop sends 0 for completed
             // items so no resume position survives the UserData write.
             markItemAsWatched(currentItemId);
-            reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * 10000000));
+            reportPlaybackStop(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
         }
         if (currentItemId && !isPlayingNext && isLastInPlaylist) {
             log('info', 'queue', 'EOF on last item, checking for auto-close');
@@ -2869,7 +2872,7 @@ async function playNextEpisode() {
             if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
-            reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
+            reportPlaybackStop(prevItemId, Math.round(prevPos * TICKS_PER_SECOND));
         }
         stopProgressPoll();
         queuePosition++;
@@ -2927,7 +2930,7 @@ async function playNextEpisode() {
             if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
-            reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
+            reportPlaybackStop(prevItemId, Math.round(prevPos * TICKS_PER_SECOND));
         }
         if (!ipcClient || ipcClient.destroyed || !mpvProcess) {
             playQueue = [nextEp.Id];
@@ -2964,7 +2967,7 @@ async function playNextEpisode() {
                     }
                 }
             }
-            reportPlaybackStop(prevItemId2, Math.round(prevPos2 * 10000000));
+            reportPlaybackStop(prevItemId2, Math.round(prevPos2 * TICKS_PER_SECOND));
         }
         const nextUpId = await queryNextUp(currentEpisodeInfo.seriesId, prevItemId2);
         if (nextUpId) {
@@ -3066,7 +3069,7 @@ async function playPreviousEpisode() {
             if (isItemCompleted(prevItemId, prevPos)) {
                 markItemAsWatched(prevItemId);
             }
-            reportPlaybackStop(prevItemId, Math.round(prevPos * 10000000));
+            reportPlaybackStop(prevItemId, Math.round(prevPos * TICKS_PER_SECOND));
         }
         stopProgressPoll();
         queuePosition--;
@@ -3183,7 +3186,7 @@ function startProgressReporting(itemId) {
             return;
         }
 
-        const currentTicks = Math.round(currentPositionSeconds * 10000000);
+        const currentTicks = Math.round(currentPositionSeconds * TICKS_PER_SECOND);
         if (currentPositionSeconds > 10 && !isStoppingPlayback && !isItemCompleted(currentItemId, currentPositionSeconds)) {
             savePlaybackPosition(currentItemId, currentTicks);
         }
@@ -3255,8 +3258,8 @@ function reportPlaybackStop(itemId, positionTicks) {
     // UpdatePlayState) silently disabled them. The server still writes
     // PlaybackPositionTicks=0 for a completed stop, and markItemAsWatched's
     // MarkPlayed(resetPosition:true) lands after as the final word.
-    const completed = isItemCompleted(itemId, positionTicks / 10000000);
-    const itemRuntimeTicks = Math.round((currentEpisodeInfo?.itemRuntime || 0) * 10000000);
+    const completed = isItemCompleted(itemId, positionTicks / TICKS_PER_SECOND);
+    const itemRuntimeTicks = Math.round((currentEpisodeInfo?.itemRuntime || 0) * TICKS_PER_SECOND);
     const reportedTicks = completed ? Math.max(positionTicks, itemRuntimeTicks) : positionTicks;
 
     const data = {
@@ -3266,7 +3269,7 @@ function reportPlaybackStop(itemId, positionTicks) {
         PlaySessionId: playSessionId
     };
 
-    log('info', 'report', `📡 Reporting playback stop (position: ${(reportedTicks / 10000000).toFixed(2)}s${completed ? ', completed' : ''})...`);
+    log('info', 'report', `📡 Reporting playback stop (position: ${(reportedTicks / TICKS_PER_SECOND).toFixed(2)}s${completed ? ', completed' : ''})...`);
     
     // Serialized on the shared chain: the phantom-resume progress POST is
     // enqueued before the close handler's stop, so it lands first — and any
@@ -3627,7 +3630,7 @@ function shutdown(signal) {
     
     const doUnwatched = !!(currentItemId && isUnwatchedQuit);
     if (!doUnwatched && currentItemId && currentPositionSeconds > 0 && !isItemCompleted(currentItemId, currentPositionSeconds)) {
-        savePlaybackPosition(currentItemId, Math.round(currentPositionSeconds * 10000000));
+        savePlaybackPosition(currentItemId, Math.round(currentPositionSeconds * TICKS_PER_SECOND));
     }
 
     let doExitCalled = false;
@@ -3671,7 +3674,7 @@ function shutdown(signal) {
 
     if (currentItemId && !isReportingStop) {
         const stopTimeout = setTimeout(finish, 3000);
-        reportPlaybackStop(currentItemId, isUnwatchedQuit ? 0 : Math.round(currentPositionSeconds * 10000000))
+        reportPlaybackStop(currentItemId, isUnwatchedQuit ? 0 : Math.round(currentPositionSeconds * TICKS_PER_SECOND))
             .finally(() => { clearTimeout(stopTimeout); finish(); });
     } else {
         finish();

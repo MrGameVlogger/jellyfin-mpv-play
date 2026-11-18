@@ -124,7 +124,7 @@ class NodeProcessManager:
                         try:
                             prev()
                         except Exception:
-                            pass
+                            pass  # prior shutdown callback failing must not block the next one
                         completion()
                     self._shutdown_completion = chained
                 else:
@@ -167,14 +167,14 @@ class NodeProcessManager:
             timer.daemon = True
             timer.start()
         except Exception:
-            pass
+            pass  # terminate() failure is non-fatal; SIGKILL fallback fires anyway
 
     def _kill_process(self):
         if self.process and self.process.poll() is None:
             try:
                 self.process.kill()
             except Exception:
-                pass
+                pass  # process already exited or permission denied — nothing to do
 
     def _watch_process(self):
         """Waits for process exit and handles restart logic."""
@@ -226,7 +226,7 @@ class NodeProcessManager:
                 self._stdout_buf += chunk
                 self._process_buffer(is_stderr=False)
         except Exception:
-            pass
+            pass  # pipe closed (process exited) — thread ends naturally
 
     def _read_stderr(self):
         try:
@@ -237,7 +237,7 @@ class NodeProcessManager:
                 self._stderr_buf += chunk
                 self._process_buffer(is_stderr=True)
         except Exception:
-            pass
+            pass  # pipe closed (process exited) — thread ends naturally
 
     def _process_buffer(self, is_stderr):
         buf = self._stderr_buf if is_stderr else self._stdout_buf
