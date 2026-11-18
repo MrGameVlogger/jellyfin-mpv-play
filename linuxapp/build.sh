@@ -38,8 +38,12 @@ cp -R "$SCRIPT_DIR/src" "$BUILD_DIR/"
 chmod +x "$BUILD_DIR/src/main.py"
 
 # ── Resources ──────────────────────────────────────────────────────────
-cp "$PROJECT_DIR/images/icon-light.svg" "$BUILD_DIR/resources/" 2>/dev/null || true
-cp "$PROJECT_DIR/images/icon-dark.svg" "$BUILD_DIR/resources/" 2>/dev/null || true
+if [ -f "$PROJECT_DIR/images/icon-light.svg" ]; then
+    cp "$PROJECT_DIR/images/icon-light.svg" "$BUILD_DIR/resources/"
+fi
+if [ -f "$PROJECT_DIR/images/icon-dark.svg" ]; then
+    cp "$PROJECT_DIR/images/icon-dark.svg" "$BUILD_DIR/resources/"
+fi
 
 # ── Node.js ────────────────────────────────────────────────────────────
 NODE_VERSION="$(tr -d '[:space:]' < "$PROJECT_DIR/.node-version")"
@@ -144,13 +148,23 @@ chmod +x "$INSTALL_DIR/jellyfin-mpv-play-tray"
 # Symlink launcher
 ln -sf "$INSTALL_DIR/jellyfin-mpv-play-tray" "$BIN_DIR/jellyfin-mpv-play-tray"
 
+# Install icon into the hicolor theme so the desktop entry can find it
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$ICON_DIR"
+if [ -f "$SCRIPT_DIR/resources/icon-light.svg" ]; then
+    cp "$SCRIPT_DIR/resources/icon-light.svg" "$ICON_DIR/jellyfin-mpv-play.svg"
+fi
+
 # Install desktop entry (fix Exec path and set working directory)
 sed "s|Exec=jellyfin-mpv-play-tray|Exec=$BIN_DIR/jellyfin-mpv-play-tray\nPath=$INSTALL_DIR|" \
     "$SCRIPT_DIR/jellyfin-mpv-play.desktop" > "$DESKTOP_DIR/jellyfin-mpv-play.desktop"
 
-# Update desktop database
+# Update desktop database and icon cache
 if command -v update-desktop-database &>/dev/null; then
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+fi
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 fi
 
 echo ""
