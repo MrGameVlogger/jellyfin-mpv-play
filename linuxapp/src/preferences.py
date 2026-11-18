@@ -14,6 +14,7 @@ from config_parser import (
     config_path,
     default_ipc_socket_path,
     default_mpv_path,
+    encrypt_value,
     escape_config_value,
     extract_value,
     list_config_files,
@@ -504,13 +505,13 @@ class PreferencesWindow(Gtk.Window):
         lines = [
             f"    serverUrl: '{escape_config_value(server_url)}',",
             f"    username: '{escape_config_value(username)}',",
-            f"    password: '{escape_config_value(password)}',",
+            f"    password: '{escape_config_value(encrypt_value(password))}',",
         ]
 
         # Optional — omitted when empty, so the shim falls back to the login token.
         api_key = self.api_key_entry.get_text().strip()
         if api_key:
-            lines.append(f"    apiKey: '{escape_config_value(api_key)}',")
+            lines.append(f"    apiKey: '{escape_config_value(encrypt_value(api_key))}',")
 
         e = escape_config_value
         lines.append(f"    mpvPath: '{e(self.mpv_path_entry.get_text().strip())}',")
