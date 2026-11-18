@@ -15,3 +15,5 @@ playback_positions_*.json
 .node-tmp/
 .node-cache/
 build/
+.agents/
+skills-lock.json
