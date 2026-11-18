@@ -21,7 +21,7 @@ All notable changes to Jellyfin MPV Play are documented here.
 ## v1.18.1
 
 ### Bug Fixes
-- **Fixed arm64 Linux tray bundle missing libatomic** — The arm64 tray bundle did not include `libatomic.so.1` (required by Node.js 25+), so it could fail on minimal distros. Both x86_64 and arm64 bundles now ship it.
+- **Fixed Linux tray bundles missing libatomic** — Neither tray bundle (x86_64 or arm64) included `libatomic.so.1` (required by Node.js 25+), so both could fail on minimal distros. Both now ship it.
 
 ---
 
