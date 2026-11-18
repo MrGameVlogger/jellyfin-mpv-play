@@ -2346,7 +2346,7 @@ function connectToMpvIpc(gen) {
             // Socket drops while stopping/shutting down are expected — mpv is
             // gone and the socket naturally resets. Not an error.
             const isExpectedDrop = isStoppingPlayback || isShuttingDown ||
-                (mpvProcess && mpvProcess.exitCode !== null);
+                !mpvProcess || mpvProcess.exitCode !== null;
             if (isExpectedDrop) {
                 log('info', 'ipc', `🔌 IPC socket closed: ${err.message}`);
             } else {
