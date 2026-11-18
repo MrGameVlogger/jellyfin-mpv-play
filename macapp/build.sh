@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 # Build against the same minimum macOS the app advertises (Info.plist
 # LSMinimumSystemVersion). Without this, the binary's minimum OS becomes the
