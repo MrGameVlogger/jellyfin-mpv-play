@@ -70,7 +70,6 @@ class NodeProcessManager:
 
         self.is_shutting_down = False
         self.is_stopping_playback = False
-        self.restart_count = 0
 
         self._setup_app_support()
         self._load_ipc_socket_path()
