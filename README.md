@@ -133,12 +133,12 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
    sudo zypper install mpv python3-gobject-Gdk gtk3 libayatana-appindicator3-1 libnotify4
    ```
 
-2. **Download** the latest `JellyfinMPVPlay-Linux-*.tar.gz` from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases)
+2. **Download** the latest `JellyfinMPVPlay-Linux-Tray-*.tar.gz` from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases)
 
 3. **Install the tray app** (recommended):
    ```bash
-   tar -xzf JellyfinMPVPlay-Linux-*.tar.gz
-   cd JellyfinMPVPlay-Linux-*
+   tar -xzf JellyfinMPVPlay-Linux-Tray-*.tar.gz
+   cd JellyfinMPVPlay-Linux-Tray-*
    ./install.sh
    ```
    This copies the app to `~/.local/share/jellyfin-mpv-play-tray`, adds a launcher to `~/.local/bin`, and registers it with your application menu. Launch from your app menu or run `jellyfin-mpv-play-tray` from a terminal.
@@ -149,11 +149,11 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
 
    > Config is saved to `~/.local/share/JellyfinMpvPlay/config.js`. Edit from the tray menu → Settings.
 
-**Alternatively**, run the shim directly without the tray app:
+**Alternatively**, run the shim directly without the tray app (headless bundle):
 
 ```bash
-tar -xzf JellyfinMPVPlay-Linux-*.tar.gz
-cd JellyfinMPVPlay-Linux-*
+tar -xzf JellyfinMPVPlay-Linux-Headless-*.tar.gz
+cd JellyfinMPVPlay-Linux-Headless-*
 ./launch.sh    # First run creates config.js
 ```
 Edit `config.js` with your Jellyfin server details:
@@ -203,7 +203,7 @@ To remove the service:
 
 ## How to Use
 
-1. **Start the app** — macOS: click the menu bar icon · Windows: double-click `launch.bat` · Linux: run `./launch.sh`
+1. **Start the app** — macOS: click the menu bar icon · Windows: double-click `launch.bat` · Linux: launch from your app menu (tray app) or run `./launch.sh`
 2. **Open Jellyfin** in your web browser
 3. **Pick something to watch** — any movie or episode
 4. **Click "Play on"** — the cast icon or "Play on" button
@@ -289,7 +289,13 @@ Or manually:
 
 ### Linux
 
-**Option A: Systemd service (recommended)**
+**Tray app:** The `install.sh` script registers the app with your desktop environment. To auto-start on login, copy the desktop entry to `~/.config/autostart/`:
+
+```bash
+cp ~/.local/share/applications/jellyfin-mpv-play.desktop ~/.config/autostart/
+```
+
+**Headless: Option A: Systemd service (recommended)**
 
 ```bash
 ./launch.sh --install-service
@@ -298,11 +304,7 @@ systemctl --user start jellyfin-mpv-play
 
 This creates a user service that starts on login and restarts on crash. Logs: `journalctl --user -u jellyfin-mpv-play -f`
 
-**Option B: Desktop file**
-
-Copy `jellyfin-mpv-play.desktop` to `~/.local/share/applications/` and update the `Exec` path. Right-click the entry in your app launcher to set it as a startup app.
-
-**Option C: Cron**
+**Headless: Option B: Cron**
 
 ```bash
 crontab -e
@@ -378,13 +380,10 @@ jellyfin-mpv-play/
 │   └── Info.plist           #   App metadata
 ├── linuxapp/                # Native Linux tray app
 │   ├── src/                 #   Python/GTK3 source files
+│   ├── headless/            #   Headless launcher + systemd service
 │   ├── build.sh             #   Build script (bundles Node.js + shim + Python)
 │   ├── resources/           #   App icons (SVG)
 │   └── jellyfin-mpv-play.desktop  # Desktop entry template
-├── linux/                   # Linux bundle launcher (headless)
-│   ├── launch.sh            #   Launcher script (--headless, --install-service)
-│   ├── jellyfin-mpv-play.service  #   Systemd user service
-│   └── jellyfin-mpv-play.desktop  #   Desktop integration
 ├── windows/                 # Windows bundle launcher
 │   └── launch.bat           #   Launcher script
 ├── images/                  # Logo SVGs and screenshots
@@ -600,13 +599,13 @@ MIT License — Feel free to use and modify! See [LICENSE](LICENSE).
 A: Yes. Tested on macOS with Homebrew MPV. Use `/opt/homebrew/bin/mpv` (Apple Silicon) or `/usr/local/bin/mpv` (Intel) as your `mpvPath`. The native macOS app bundles Node.js 26 LTS — no separate installation needed. Requires macOS 13.5+. The release bundle is Apple Silicon; on Intel Macs, build from source (`cd macapp && ./build.sh` compiles for your Mac's architecture).
 
 **Q: Does this work on Linux?**
-A: Yes. Download the Linux bundle from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases), extract, and run `./launch.sh`. Set `mpvPath` to `/usr/bin/mpv` (or wherever MPV is installed). The bundle is self-contained (including `libatomic` for the bundled Node.js). If `launch.sh` still fails with a loader error, make sure the bundle's `lib/` directory is intact and your glibc is 2.28 or newer.
+A: Yes. Two options: the **tray app** (recommended for desktop users) — download `JellyfinMPVPlay-Linux-Tray-*.tar.gz`, extract, run `./install.sh`, and launch from your app menu. Requires Python 3 with GTK3 and AppIndicator (see Quick Start above). Or the **headless bundle** (for servers/minimal setups) — download `JellyfinMPVPlay-Linux-Headless-*.tar.gz`, extract, and run `./launch.sh`. Both bundles include their own Node.js and `libatomic`. Requires glibc 2.28+.
 
 **Q: Can I use this over the internet?**
 A: Yes, if your Jellyfin server is accessible, but LAN is recommended.
 
 **Q: Can I run multiple instances?**
-A: Yes, use multi-config support: `node shim.js config.work.js` or `./launch.sh config.work.js`. Each config gets its own deviceId, token, positions, and IPC socket. On macOS, use the config file selector in Settings.
+A: Yes, use multi-config support: `node shim.js config.work.js` or `./launch.sh config.work.js`. Each config gets its own deviceId, token, positions, and IPC socket. On macOS and the Linux tray app, use the config file selector in Settings.
 
 **Q: Can I run multiple instances of the same config?**
 A: Yes, use the `--allow-duplicates` flag: `node shim.js config.js --allow-duplicates` or `./launch.sh --allow-duplicates`. Without this flag, a dialog will warn you about the duplicate instance (headless mode only). With the flag, the dialog is skipped and each instance gets its own log file (e.g., `shim-config-12345.log` in headless mode).
@@ -614,13 +613,16 @@ A: Yes, use the `--allow-duplicates` flag: `node shim.js config.js --allow-dupli
 **Q: Does SyncPlay work?**
 A: Yes, full SyncPlay support is included. Join a SyncPlay group from the Jellyfin web UI and the MPV client will follow along — pause, unpause, seek, and playlist changes are all synchronized.
 
-**Q: Where is my config on macOS?**
-A: `~/Library/Application Support/JellyfinMpvPlay/config.js`. The setup wizard configures this on first launch.
+**Q: Where is my config on Linux?**
+A: Tray app: `~/.local/share/JellyfinMpvPlay/config.js` (edit from the tray menu → Settings). Headless: `config.js` in the extracted bundle folder.
 
 **Q: How do I update the macOS app?**
 A: Download the latest release, unzip, and replace the app in `/Applications`. Your config is stored separately and persists across updates.
 
-**Q: How do I update the Linux/Windows bundle?**
+**Q: How do I update the Linux tray app?**
+A: Download the latest release, extract, run `./install.sh`. The install script overwrites the app files but preserves your config.
+
+**Q: How do I update the Linux headless/Windows bundle?**
 A: Download the latest release, extract to a new folder, and copy your `config.js` from the old folder. Your `data/` folder (playback positions) can also be copied over.
 
 ---

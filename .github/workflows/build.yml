@@ -112,7 +112,7 @@ jobs:
 
       - name: Assemble bundle
         run: |
-          NAME="JellyfinMPVPlay-Linux-v${{ needs.get-version.outputs.version }}"
+          NAME="JellyfinMPVPlay-Linux-Headless-v${{ needs.get-version.outputs.version }}"
           mkdir -p "$NAME/node" "$NAME/images"
 
           tar -xzf ".node-cache/node-v${NODE_VERSION}-linux-x64.tar.gz" -C .node-cache
@@ -151,7 +151,7 @@ jobs:
 
           cp shim.js package.json config.example.js "$NAME/"
           cp -R node_modules "$NAME/"
-          cp -R linux/* "$NAME/"
+          cp -R linuxapp/headless/* "$NAME/"
           cp images/icon.svg "$NAME/images/"
           chmod +x "$NAME/launch.sh"
 
@@ -315,7 +315,7 @@ jobs:
           fi
 
           # Prepend Downloads table
-          DOWNLOADS="### Downloads\n| Platform | File |\n|----------|------|\n| macOS | \`JellyfinMPVPlay-macOS-v${VERSION}.zip\` |\n| Linux (tray app, x86_64) | \`JellyfinMPVPlay-Linux-x86_64-v${VERSION}.tar.gz\` |\n| Linux (tray app, arm64) | \`JellyfinMPVPlay-Linux-arm64-v${VERSION}.tar.gz\` |\n| Linux (headless) | \`JellyfinMPVPlay-Linux-v${VERSION}.tar.gz\` |\n| Windows | \`JellyfinMPVPlay-Windows-v${VERSION}.zip\` |\n"
+          DOWNLOADS="### Downloads\n| Platform | File |\n|----------|------|\n| macOS | \`JellyfinMPVPlay-macOS-v${VERSION}.zip\` |\n| Linux (tray app, x86_64) | \`JellyfinMPVPlay-Linux-Tray-x86_64-v${VERSION}.tar.gz\` |\n| Linux (tray app, arm64) | \`JellyfinMPVPlay-Linux-Tray-arm64-v${VERSION}.tar.gz\` |\n| Linux (headless) | \`JellyfinMPVPlay-Linux-Headless-v${VERSION}.tar.gz\` |\n| Windows | \`JellyfinMPVPlay-Windows-v${VERSION}.zip\` |\n"
           echo -e "$DOWNLOADS" > /tmp/downloads.md
           cat notes.md >> /tmp/downloads.md
           mv /tmp/downloads.md notes.md

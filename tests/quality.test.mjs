@@ -187,7 +187,7 @@ test('macOS deployment floor is consistent across Info.plist and build.sh', () =
 
 test('Linux bundle ships its own libatomic and launch.sh exports LD_LIBRARY_PATH', () => {
   const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
-  const launchSh = fs.readFileSync('linux/launch.sh', 'utf8');
+  const launchSh = fs.readFileSync('linuxapp/headless/launch.sh', 'utf8');
 
   assert(
     workflow.includes('libatomic1_') && workflow.includes('libatomic.so.1'),
@@ -199,7 +199,7 @@ test('Linux bundle ships its own libatomic and launch.sh exports LD_LIBRARY_PATH
   );
   assert(
     launchSh.includes('LD_LIBRARY_PATH') && launchSh.includes('"$SCRIPT_DIR/lib"'),
-    'linux/launch.sh must export LD_LIBRARY_PATH pointing at the bundled lib/ dir'
+    'linuxapp/headless/launch.sh must export LD_LIBRARY_PATH pointing at the bundled lib/ dir'
   );
 });
 
