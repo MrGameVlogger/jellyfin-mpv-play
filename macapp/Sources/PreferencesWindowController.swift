@@ -511,6 +511,7 @@ class PreferencesWindowController: NSWindowController {
         let configPath = ConfigParser.configPath(fileName: configFileName)
         do {
             try config.write(toFile: configPath, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configPath)
             onSave?()
             window?.close()
         } catch {
