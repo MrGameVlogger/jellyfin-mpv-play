@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <i>Fork of <a href="https://github.com/JohnGlaus/Jellyfin_mpv_play">JohnGlaus/Jellyfin_mpv_play</a> — adds native macOS menubar app, cross-platform bundles, setup wizard, and stability fixes.</i>
+  <i>Fork of <a href="https://github.com/JohnGlaus/Jellyfin_mpv_play">JohnGlaus/Jellyfin_mpv_play</a> — adds native macOS menubar and Linux tray apps, cross-platform bundles, setup wizard, and stability fixes.</i>
 </p>
 
 ---
@@ -43,8 +43,9 @@
 - **Multi-Config Support** — Run multiple instances with different configs (`node shim.js config.work.js`), or same config with `--allow-duplicates` flag
 - **Better Logging** — Structured `[timestamp] [component]` format with `verbose` config option
 - **Native macOS App** — Menubar icon, notifications, preferences editor, log viewer, setup wizard, config file selector
+- **Native Linux App** — System tray icon, notifications, settings editor, log viewer, setup wizard (GTK3 + AyatanaAppIndicator3)
 - **Self-Contained Bundles** — All platforms bundle Node.js 26 LTS; just install MPV and go
-- **Built-in Help** — Reference guide accessible from the menu bar (macOS)
+- **Built-in Help** — Reference guide accessible from the menu bar (macOS) or tray menu (Linux)
 
 ---
 
@@ -54,7 +55,7 @@
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-.tar.gz-yellow?style=for-the-badge&logo=linux"></a>
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-.zip-blue?style=for-the-badge&logo=windows"></a>
 
-All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. The Linux bundle also carries its own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros.
+All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. The Linux bundle also carries its own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros. The Linux tray app requires Python 3 with GTK3 and AppIndicator (see Quick Start below).
 
 **Supported platforms:** macOS 13.5+ (Apple Silicon release bundle; Intel Macs: build from source with `./macapp/build.sh`) · Linux x86-64 with glibc 2.28+ (not musl/Alpine) · Windows 10 1809+.
 
@@ -120,47 +121,59 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
 
 ### Linux
 
-1. **Install MPV:**
+1. **Install MPV and dependencies:**
    ```bash
    # Ubuntu/Debian
-   sudo apt install mpv
+   sudo apt install mpv python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 libnotify4
    # Fedora
-   sudo dnf install mpv
+   sudo dnf install mpv python3-gobject gtk3 libayatana-appindicator-gtk3 libnotify
    # Arch
-   sudo pacman -S mpv
+   sudo pacman -S mpv python-gobject gtk3 libayatana-appindicator libnotify
+   # openSUSE
+   sudo zypper install mpv python3-gobject-Gdk gtk3 libayatana-appindicator3-1 libnotify4
    ```
 
 2. **Download** the latest `JellyfinMPVPlay-Linux-*.tar.gz` from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases)
 
-3. **Extract** and configure:
+3. **Install the tray app** (recommended):
    ```bash
    tar -xzf JellyfinMPVPlay-Linux-*.tar.gz
    cd JellyfinMPVPlay-Linux-*
-   ./launch.sh    # First run creates config.js
+   ./install.sh
    ```
-   Edit `config.js` with your Jellyfin server details:
-   ```javascript
-   module.exports = {
-       serverUrl: 'http://192.168.1.100:8096',
-       username: 'your_username',
-       password: 'your_password',
-       mpvPath: '/usr/bin/mpv',
-       deviceName: 'My-PC',
-       deviceId: 'my-pc',
-       // apiKey: '',             // Optional: API key for media URLs (survives token reauth)
-       // fullscreen: true,       // Start MPV in fullscreen
-       // autoClose: true,         // Close app when queue finishes
-       // mpvFlags: [],            // Extra MPV flags
-       // headless: true,          // Suppress console output, log to data/shim-<configname>.log
-   };
-   ```
+   This copies the app to `~/.local/share/jellyfin-mpv-play-tray`, adds a launcher to `~/.local/bin`, and registers it with your application menu. Launch from your app menu or run `jellyfin-mpv-play-tray` from a terminal.
 
-4. **Run:**
-   ```bash
-   ./launch.sh
-   ```
+   > **GNOME users:** install the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/) to see the tray icon. KDE and XFCE work out of the box.
 
-   > To add to your app launcher, copy `jellyfin-mpv-play.desktop` to `~/.local/share/applications/` and update the `Exec` path.
+4. **First launch** — the setup wizard walks you through server URL, credentials, MPV path, and device settings.
+
+   > Config is saved to `~/.local/share/JellyfinMpvPlay/config.js`. Edit from the tray menu → Settings.
+
+**Alternatively**, run the shim directly without the tray app:
+
+```bash
+tar -xzf JellyfinMPVPlay-Linux-*.tar.gz
+cd JellyfinMPVPlay-Linux-*
+./launch.sh    # First run creates config.js
+```
+Edit `config.js` with your Jellyfin server details:
+```javascript
+module.exports = {
+    serverUrl: 'http://192.168.1.100:8096',
+    username: 'your_username',
+    password: 'your_password',
+    mpvPath: '/usr/bin/mpv',
+    deviceName: 'My-PC',
+    deviceId: 'my-pc',
+    // apiKey: '',             // Optional: API key for media URLs (survives token reauth)
+    // fullscreen: true,       // Start MPV in fullscreen
+    // autoClose: true,         // Close app when queue finishes
+    // mpvFlags: [],            // Extra MPV flags (add '--tls-verify=no' for HTTPS with self-signed certs)
+    // headless: true,          // Suppress console output, log to data/shim-<configname>.log
+};
+```
+
+Then run `./launch.sh`.
 
 #### Headless / Background Service
 
@@ -363,7 +376,12 @@ jellyfin-mpv-play/
 │   ├── build.sh             #   Build script (downloads + bundles Node.js)
 │   ├── AppIcon.icns         #   App icon (macOS .icns format)
 │   └── Info.plist           #   App metadata
-├── linux/                   # Linux bundle launcher
+├── linuxapp/                # Native Linux tray app
+│   ├── src/                 #   Python/GTK3 source files
+│   ├── build.sh             #   Build script (bundles Node.js + shim + Python)
+│   ├── resources/           #   App icons (SVG)
+│   └── jellyfin-mpv-play.desktop  # Desktop entry template
+├── linux/                   # Linux bundle launcher (headless)
 │   ├── launch.sh            #   Launcher script (--headless, --install-service)
 │   ├── jellyfin-mpv-play.service  #   Systemd user service
 │   └── jellyfin-mpv-play.desktop  #   Desktop integration

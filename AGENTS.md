@@ -38,7 +38,7 @@ For example, if the user asks you to fix a bug:
 
 ## What this is
 
-Node.js shim (`shim.js`) that connects to Jellyfin via WebSocket, receives play commands, and controls MPV via Unix socket IPC. Optional macOS menubar app (`macapp/`) spawns the shim and parses its stdout for UI state. Linux and Windows users run `shim.js` directly via platform-specific launcher scripts.
+Node.js shim (`shim.js`) that connects to Jellyfin via WebSocket, receives play commands, and controls MPV via Unix socket IPC. Two native UIs wrap it: a macOS menubar app (`macapp/`, Swift) and a Linux system tray app (`linuxapp/`, Python/GTK3). Windows and headless Linux users run `shim.js` directly via launcher scripts.
 
 ## Commands
 
@@ -46,6 +46,8 @@ Node.js shim (`shim.js`) that connects to Jellyfin via WebSocket, receives play 
 npm install && npm start     # run shim directly
 cd macapp && ./build.sh      # compile Swift, bundle Node.js 26 LTS, deploy to /Applications
 cd macapp && CI=true ./build.sh  # build without deploying to /Applications
+cd linuxapp && ./build.sh x86_64 --package   # build Linux tray app bundle (use arm64 for ARM)
+cd linuxapp && ./build.sh                      # build without packaging
 ```
 
 No lint or typecheck steps exist. Tests run via `npm test`.
@@ -64,6 +66,9 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `macapp/Sources/*.swift` | Native macOS menubar app (11 files) |
 | `macapp/build.sh` | Compile Swift, bundle Node.js 26 LTS, deploy to `/Applications` |
 | `macapp/Info.plist` | App version — auto-synced by CI from `package.json`; don't edit manually |
+| `linuxapp/src/*.py` | Native Linux system tray app (10 files, Python/GTK3) |
+| `linuxapp/build.sh` | Build script: bundles Node.js + shim + Python, creates launcher + installer |
+| `linuxapp/jellyfin-mpv-play.desktop` | Desktop entry for application menus |
 | `linux/launch.sh` | Smart launcher: detects headless config, manages systemd service |
 | `linux/jellyfin-mpv-play.desktop` | Desktop entry with actions (Launch, Headless, Quit) |
 | `linux/jellyfin-mpv-play.service` | Systemd user service for headless mode |
@@ -199,7 +204,7 @@ All options go in `config.js` (copy from `config.example.js`):
 | `ipcSocketPath` | string | `$XDG_RUNTIME_DIR/mpv-ipc.sock` (Linux), `/tmp/mpv-ipc.sock` (macOS), `\\.\pipe\mpv-ipc` (Windows) | Unix socket path |
 | `fullscreen` | boolean | `false` | Start MPV in fullscreen mode |
 | `autoClose` | boolean | `false` | Close shim when playback ends |
-| `mpvFlags` | array | `[]` | Additional MPV arguments (e.g. `["--hwdec=auto"]`) |
+| `mpvFlags` | array | `[]` | Additional MPV arguments (e.g. `["--hwdec=auto"]`). For HTTPS with self-signed certs on mpv 0.42+, add `--tls-verify=no` |
 | `headless` | boolean | `false` | Redirect logs to `data/shim-<configname>.log`, suppress stdout/stderr |
 | `autoSkipIntros` | boolean | `false` | Auto-skip intros/outros after 3s (or show "Press S to skip" OSD) |
 | `disableSkipIntro` | boolean | `false` | Completely disable intro/outro skip feature (hides prompts, no S key) |
@@ -494,8 +499,27 @@ Use patterns like:
 - Config file location: `~/Library/Application Support/JellyfinMpvPlay/config.js`
 - Log file location: `~/Library/Application Support/JellyfinMpvPlay/data/jellyfin-mpv-play-*.log` (timestamped)
 
-### Linux (`linux/`)
+### Linux (`linuxapp/` and `linux/`)
 
+**Tray app (`linuxapp/`)** — Python/GTK3 system tray application:
+- Uses AyatanaAppIndicator3 (falls back gracefully if `AyatanaAppIndicatorGlib` is available on newer distros)
+- 10 modules: `main.py` (App), `tray.py` (TrayController), `node_manager.py` (NodeProcessManager), `config_parser.py`, `preferences.py`, `setup_wizard.py`, `log_viewer.py`, `about.py`, `help_window.py`, `notifications.py`
+- Mirrors the macOS app: setup wizard, settings editor, log viewer, notifications, auto-restart on crash
+- Spawns the same `shim.js` and parses stdout for state (same log line contracts)
+- `build.sh` bundles Node.js + shim + Python source; `install.sh` installs to `~/.local` with XDG paths
+
+**GTK3/PyGObject pitfalls learned during development:**
+- `Gtk.Box(orientation=..., spacing=...)` keyword constructor raises `RuntimeError: field is not writable` on some PyGObject versions. Use `Gtk.Box()` + `set_orientation()` + `set_spacing()`.
+- Setting `self.container = ...` on a `Gtk.Window` subclass triggers GObject property interception ("field is not writable"). Avoid attribute names that match GObject properties (`container`, `title`, `parent`, `child`, `visible`, `name`, etc.).
+- `GLib.idle_add()` is required for ALL cross-thread GTK mutations — `threading.Thread` callbacks must marshal through it.
+- `override_font`/`override_color` are deprecated since GTK 3.16 — use `Gtk.CssProvider` + style classes.
+- `Gtk.STOCK_*` constants deprecated since 3.10 — use mnemonic strings like `"_Cancel"`.
+- `add_with_viewport` deprecated since 3.8 — `scrolled.add()` auto-adds a viewport.
+- Launcher scripts must resolve symlinks (`BASH_SOURCE[0]` resolves to the link path, not the target).
+- Desktop entry `Icon=` with an absolute path is more reliable than icon-theme lookup.
+- Always overwrite managed files (`shim.js`, `package.json`) on startup — the macOS app's `setupApplicationSupport` pattern. Only `config.js` is user data.
+
+**Legacy launcher (`linux/`):**
 - `launch.sh` detects headless config via node (`require(config).headless`), re-opens terminal if needed
 - `--install-service` / `--uninstall-service` manages systemd user service
 - `jellyfin-mpv-play.desktop` has Terminal=false (launch.sh handles terminal detection)
@@ -515,6 +539,8 @@ Use patterns like:
 ### IPC connection failure
 
 `connectToMpvIpc()` retries up to 10 times with 500ms delay (via `attemptConnection()`). If all retries fail, `pendingStreamUrl` is set and `playMedia()` will spawn a fresh MPV when the next command arrives.
+
+**IPC socket drops during shutdown are expected.** When mpv closes directly (window X button, not through the app's Stop/Quit), the socket gets `ECONNRESET` before the process exit event fires — state flags (`isStoppingPlayback`, `isShuttingDown`, `mpvProcess.exitCode`) are all still false at that moment. The error handler matches connection-reset codes (`ECONNRESET`, `EPIPE`, `EOF`, `ERR_STREAM`) alongside the state flags and logs `🔌 IPC socket closed` (info) instead of `⚠️ IPC error` (error). The "MPV not running, canceling IPC connection" retry message is also info-level. This prevents spurious error notifications on both macOS and Linux when the user closes mpv directly.
 
 ### WebSocket disconnect
 
