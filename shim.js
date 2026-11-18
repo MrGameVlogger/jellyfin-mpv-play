@@ -630,6 +630,9 @@ function setAssPrimaryColourOverride(colorOrNull) {
                 ours.push(`PrimaryColour=&H00${bb}${gg}${rr}`);
             }
             sendMpvCommand('set_property', ['sub-ass-style-overrides', ours.join(',')]);
+        })
+        .catch(err => {
+            log('warn', 'osd', '⚠️ Error setting ASS colour override:', err.message);
         });
 }
 
@@ -2789,6 +2792,8 @@ function handleMpvEvent(event) {
                     beginPlaybackReporting(currentItemId);
                     startProgressPoll();
                 });
+            }).catch(err => {
+                log('error', 'queue', '⚠️ Error resolving playlist entry:', err.message);
             });
         }
         return;
@@ -3334,7 +3339,7 @@ function handleOscAction(verb, arg) {
                 // ASS/SSA subs ignore sub-color — recolour them via the style
                 // override; push state once the override has landed so the
                 // reported current colour reflects it
-                setAssPrimaryColourOverride(arg).then(() => pushOscState());
+                setAssPrimaryColourOverride(arg).then(() => pushOscState()).catch(() => {});
             }
             break;
         case 'toggle-favorite':
