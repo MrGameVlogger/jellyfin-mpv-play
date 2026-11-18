@@ -55,9 +55,9 @@
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-.tar.gz-yellow?style=for-the-badge&logo=linux"></a>
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-.zip-blue?style=for-the-badge&logo=windows"></a>
 
-All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. The Linux bundle also carries its own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros. The Linux tray app requires Python 3 with GTK3 and AppIndicator (see Quick Start below).
+All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. Linux bundles also carry their own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros. The Linux tray app additionally requires Python 3 with GTK3 and AppIndicator (see Quick Start below).
 
-**Supported platforms:** macOS 13.5+ (Apple Silicon release bundle; Intel Macs: build from source with `./macapp/build.sh`) · Linux x86-64 with glibc 2.28+ (not musl/Alpine) · Windows 10 1809+.
+**Supported platforms:** macOS 13.5+ (Apple Silicon release bundle; Intel Macs: build from source with `./macapp/build.sh`) · Linux x86-64 and arm64 with glibc 2.28+ (not musl/Alpine) · Windows 10 1809+.
 
 ---
 
@@ -382,7 +382,6 @@ jellyfin-mpv-play/
 │   ├── src/                 #   Python/GTK3 source files
 │   ├── headless/            #   Headless launcher + systemd service
 │   ├── build.sh             #   Build script (bundles Node.js + shim + Python)
-│   ├── resources/           #   App icons (SVG)
 │   └── jellyfin-mpv-play.desktop  # Desktop entry template
 ├── windows/                 # Windows bundle launcher
 │   └── launch.bat           #   Launcher script

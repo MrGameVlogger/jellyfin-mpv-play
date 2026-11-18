@@ -70,7 +70,7 @@ No lint or typecheck steps exist. Tests run via `npm test`.
 | `linuxapp/build.sh` | Build script: bundles Node.js + shim + Python, creates launcher + installer |
 | `linuxapp/jellyfin-mpv-play.desktop` | Desktop entry for application menus |
 | `linuxapp/headless/launch.sh` | Smart launcher: detects headless config, manages systemd service |
-| `linuxapp/headless/jellyfin-mpv-play.desktop` | Desktop entry with actions (Launch, Headless, Quit) |
+| `linuxapp/headless/jellyfin-mpv-play.desktop` | Desktop entry with actions (Headless, InstallService, UninstallService) |
 | `linuxapp/headless/jellyfin-mpv-play.service` | Systemd user service for headless mode |
 | `windows/launch.bat` | Windows launcher with `--headless` flag support |
 | `.github/workflows/build.yml` | CI: tag-triggered, builds 3 platforms, creates GitHub Release |
@@ -219,106 +219,107 @@ All options go in `config.js` (copy from `config.example.js`):
 
 ## Key functions map
 
-All functions live in `shim.js`. There are no classes — the entire app is procedural with module-level state.
+All functions live in `shim.js`. There are no classes — the entire app is procedural with module-level state. Line numbers are approximate — use `grep -n 'function <name>' shim.js` to find the current location.
 
 ### Lifecycle & auth
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `main()` | 3148 | Entry point: creates `data/`, loads token or authenticates, connects WebSocket |
-| `authenticateUser()` | 391 | POSTs to `/Users/AuthenticateByName`, saves token |
-| `loadToken()` | 354 | Reads JWT from `data/jellyfin_token_{deviceId}.json` |
-| `saveToken(authResponse)` | 379 | Persists JWT to disk |
-| `getAuthHeaders()` | 450 | Returns `Authorization: MediaBrowser Token=...` header |
-| `generateOrLoadDeviceId()` | 324 | Reads or generates the per-config device ID from `data/.device-id-{config}` (one-time adopter of the legacy `data/.device-id`) |
+| `main()` | 3849 | Entry point: creates `data/`, loads token or authenticates, connects WebSocket |
+| `authenticateUser()` | 755 | POSTs to `/Users/AuthenticateByName`, saves token |
+| `loadToken()` | 718 | Reads JWT from `data/jellyfin_token_{deviceId}.json` |
+| `saveToken(authResponse)` | 743 | Persists JWT to disk |
+| `getAuthHeaders()` | 814 | Returns `Authorization: MediaBrowser Token=...` header |
+| `generateOrLoadDeviceId()` | 688 | Reads or generates the per-config device ID from `data/.device-id-{config}` (one-time adopter of the legacy `data/.device-id`) |
 
 ### WebSocket & Jellyfin communication
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `connectSocket(sock)` | — | Establishes one WS connection (primary/presence), message handler, keep-alive, watchdog |
-| `ensureSocketsConnected()` | — | Connects any socket that is down (boot, post-reauth) |
-| `sendWsMessage(obj)` / `sendOnSocket(sock, obj)` | — | Outbound WS traffic (primary preferred; per-socket for subscriptions) |
-| `scheduleReconnect()` | 595 | Reconnect backoff matching jellyfin-web's SDK (1s × 1.5, 30s cap) |
-| `handleMessage(msg)` | 700 | Main WS message dispatcher — handles Play, Playstate, GeneralCommand |
-| `reportCapabilities()` | 659 | Registers session capabilities with Jellyfin |
-| `getEpisodeInfo(itemId, silent)` | 1174 | Fetches item metadata + season episode list |
-| `queryNextUp(seriesId, excludeItemId)` | 2399 | Queries `/Shows/NextUp` for next unwatched episode |
+| `connectSocket(sock)` | 854 | Establishes one WS connection (primary/presence), message handler, keep-alive, watchdog |
+| `closeAllWs()` | 548 | Closes both WS connections |
+| `ensureSocketsConnected()` | 541 | Connects any socket that is down (boot, post-reauth) |
+| `sendWsMessage(obj)` / `sendOnSocket(sock, obj)` | 537/523 | Outbound WS traffic (primary preferred; per-socket for subscriptions) |
+| `scheduleReconnect(sock)` | 1037 | Reconnect backoff matching jellyfin-web's SDK (1s × 1.5, 30s cap) |
+| `handleMessage(sock, msg)` | 1161 | Main WS message dispatcher — handles Play, Playstate, GeneralCommand |
+| `reportCapabilities()` | 1122 | Registers session capabilities with Jellyfin |
+| `getEpisodeInfo(itemId, silent)` | 1650 | Fetches item metadata + season episode list |
+| `queryNextUp(seriesId, excludeItemId)` | 3005 | Queries `/Shows/NextUp` for next unwatched episode |
 
 ### MPV control
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `playMedia(itemId, startTicks)` | 1503 | Spawns fresh MPV process with IPC socket |
-| `loadNewQueue(itemId, startTicks)` | 1389 | Loads new queue into running MPV (clears playlist, reloads) |
-| `connectToMpvIpc(gen)` | 1687 | Connects to MPV Unix socket, observes properties, binds keys |
-| `killMpv()` | 1891 | Kills MPV, cleans up IPC, resolves pending queries |
-| `sendMpvCommand(command, args)` | 1932 | Sends JSON command to MPV via IPC |
-| `queryProperty(property, timeoutMs)` | 1952 | Queries MPV property (returns Promise) |
-| `startProgressPoll()` | 1975 | 1s interval: polls `time-pos`/`duration`, triggers next episode near end |
-| `stopProgressPoll()` | 2015 | Clears progress poll timer |
-| `handleMpvEvent(event)` | 2022 | Processes MPV IPC events (file-loaded, property changes, keybinds) |
+| `playMedia(itemId, startTicks)` | 2013 | Spawns fresh MPV process with IPC socket |
+| `loadNewQueue(itemId, startTicks)` | 1892 | Loads new queue into running MPV (clears playlist, reloads) |
+| `connectToMpvIpc(gen)` | 2214 | Connects to MPV Unix socket, observes properties, binds keys |
+| `killMpv()` | 2430 | Kills MPV, cleans up IPC, resolves pending queries |
+| `sendMpvCommand(command, args)` | 2474 | Sends JSON command to MPV via IPC |
+| `queryProperty(property, timeoutMs)` | 2500 | Queries MPV property (returns Promise) |
+| `startProgressPoll()` | 2523 | 1s interval: polls `time-pos`/`duration`, triggers next episode near end |
+| `stopProgressPoll()` | 2563 | Clears progress poll timer |
+| `handleMpvEvent(event)` | 2570 | Processes MPV IPC events (file-loaded, property changes, keybinds) |
 
 ### Queue & episode transitions
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `playNextEpisode()` | 2638 | Advances to next episode (queue → season → NextUp → end) |
-| `playPreviousEpisode()` | 2824 | Goes to previous episode (restart if >30s, queue, or season prev) |
-| `beginPlaybackReporting(itemId)` | — | Start report + fresh playSessionId + progress interval for a transition target (required whenever a path pre-updates queue state and bypasses the playlist-pos handler) |
+| `playNextEpisode()` | 2844 | Advances to next episode (queue → season → NextUp → end) |
+| `playPreviousEpisode()` | 3032 | Goes to previous episode (restart if >30s, queue, or season prev) |
+| `beginPlaybackReporting(itemId)` | 3122 | Start report + fresh playSessionId + progress interval for a transition target |
 
 ### Item info cache & queue construction
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `buildStreamIndexMap(mediaStreams, mpvTracks, itemId)` | 153 | Explicit Jellyfin Index ↔ mpv track id map (embedded zipped by order, external by URL) |
-| `jellyfinStreamIndexToMpvId(streamIndex, type)` | 193 | Jellyfin stream index → mpv aid/sid (map first, then legacy fallbacks) |
-| `mpvTrackIdToJellyfinIndex(mpvId, type)` | 210 | mpv track id → Jellyfin stream index (inverse) |
-| `cacheItemInfo(item)` | 271 | Stores title/mediaStreams/mediaSourceId in `itemInfoCache` |
-| `fetchItemInfoBatch(ids)` | 286 | One `Ids=` batch request filling titles + streams for a queue |
-| `buildQueueM3u(ids)` | 311 | `memory://#EXTM3U` with `#EXTINF` titles + stream URLs (stock OSC playlist names) |
-| `externalStreamUrl(stream, itemId)` | 329 | Delivery URL for a sidecar subtitle/audio stream |
-| `loadExternalStreams(itemId)` | 354 | `sub-add`/`audio-add` each external stream of the loaded file |
-| `applyRequestedStreamSelection()` | 398 | Re-applies the server-requested audio/subtitle track (covers late external adds) |
+| `buildStreamIndexMap(mediaStreams, mpvTracks, itemId)` | 154 | Explicit Jellyfin Index ↔ mpv track id map (embedded zipped by order, external by URL) |
+| `jellyfinStreamIndexToMpvId(streamIndex, type)` | 194 | Jellyfin stream index → mpv aid/sid (map first, then legacy fallbacks) |
+| `mpvTrackIdToJellyfinIndex(mpvId, type)` | 211 | mpv track id → Jellyfin stream index (inverse) |
+| `cacheItemInfo(item)` | 284 | Stores title/mediaStreams/mediaSourceId in `itemInfoCache` |
+| `fetchItemInfoBatch(ids)` | 299 | One `Ids=` batch request filling titles + streams for a queue |
+| `buildQueueM3u(ids)` | 323 | `memory://#EXTM3U` with `#EXTINF` titles + stream URLs (stock OSC playlist names) |
+| `externalStreamUrl(stream, itemId)` | 341 | Delivery URL for a sidecar subtitle/audio stream |
+| `loadExternalStreams(itemId, generation)` | 389 | `sub-add`/`audio-add` each external stream of the loaded file |
+| `applyRequestedStreamSelection()` | 439 | Re-applies the server-requested audio/subtitle track (covers late external adds) |
 
 ### Auto-skip & OSD
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `getIntroSegments(itemId)` | 1248 | Fetches intro/outro segments from Jellyfin MediaSegments API |
-| `skipIntro()` | 1290 | Seeks to end of current intro/outro segment |
-| `checkIntroSegment(positionTicks)` | 1308 | Checks if position is inside an intro/outro segment |
-| `showSkipOsd(text)` | 1338 | Shows bottom-right OSD (skip prompts, next-up notification) |
-| `showErrorOsd(text)` | 1362 | Shows top-right OSD (connection/auth errors, rate limited) |
+| `getIntroSegments(itemId)` | 1726 | Fetches intro/outro segments from Jellyfin MediaSegments API |
+| `skipIntro()` | 1766 | Seeks to end of current intro/outro segment |
+| `checkIntroSegment(positionTicks)` | 1784 | Checks if position is inside an intro/outro segment |
+| `showSkipOsd(text)` | 1818 | Shows bottom-right OSD (skip prompts, next-up notification) |
+| `showErrorOsd(text)` | 1856 | Shows top-right OSD (connection/auth errors, rate limited) |
 
 ### Playback reporting
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `reportPlaybackStart(itemId, positionTicks)` | 2509 | Reports start to `/Sessions/Playing` |
-| `reportPlaybackProgress(itemId, positionTicks)` | 2566 | Reports progress to `/Sessions/Playing/Progress` |
-| `reportPlaybackStop(itemId, positionTicks)` | 2595 | Reports stop to `/Sessions/Playing/Stopped` |
-| `startProgressReporting(itemId)` | 2545 | 10s interval: saves local playback positions |
-| `markItemAsUnwatched(itemId)` | 1847 | Resets item to unwatched in Jellyfin (`DELETE /PlayedItems`), clears local position |
-| `markItemAsWatched(itemId)` | 1869 | Marks item as played, clears local position |
-| `savePlaybackPosition(itemId, positionTicks)` | 436 | Persists position to `data/playback_positions_{deviceId}.json` |
-| `loadPlaybackPositions()` | 424 | Reads saved positions from disk |
+| `reportPlaybackStart(itemId, positionTicks)` | 3128 | Reports start to `/Sessions/Playing` |
+| `reportPlaybackProgress(itemId, positionTicks)` | 3190 | Reports progress to `/Sessions/Playing/Progress` |
+| `reportPlaybackStop(itemId, positionTicks)` | 3235 | Reports stop to `/Sessions/Playing/Stopped` |
+| `startProgressReporting(itemId)` | 3169 | 10s interval: saves local playback positions |
+| `markItemAsUnwatched(itemId)` | 2385 | Resets item to unwatched in Jellyfin (`DELETE /PlayedItems`), clears local position |
+| `markItemAsWatched(itemId)` | 2406 | Marks item as played, clears local position |
+| `savePlaybackPosition(itemId, positionTicks)` | 800 | Persists position to `data/playback_positions_{deviceId}.json` |
+| `loadPlaybackPositions()` | 788 | Reads saved positions from disk |
 
 ### Shutdown
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `shutdown(signal)` | 2935 | Graceful exit: saves positions (unless `isUnwatchedQuit`), kills MPV, sends SessionsStop, closes WS |
+| `shutdown(signal)` | 3594 | Graceful exit: saves positions (unless `isUnwatchedQuit`), kills MPV, sends SessionsStop, closes WS |
 
 ### jf-mpv-osc integration
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `handleOscAction(verb, arg)` | 2625 | Handles actions from OSC. Verbs: `skip-segment`, `next-item`, `prev-item`, `set-sub`, `set-audio`, `set-sub-size`, `set-sub-position`, `set-sub-color`, `toggle-favorite`, `screenshot`, `set-fullscreen`, `unwatched-quit`, `syncplay-refresh`, `syncplay-join`, `syncplay-new`, `syncplay-disable`, `syncplay-toggle-pause` |
-| `pushOscState(hasMedia)` | 2725 | Pushes state blob to OSC (queue, favorites, tracks, subtitle styling) |
-| `pushOscSkipButton(label)` | 2851 | Pushes skip button label to OSC (or empty to hide) |
-| `toggleFavorite()` | 2915 | Toggles favorite via Jellyfin API and pushes updated state |
-| `setAssPrimaryColourOverride(colorOrNull)` | 259 | Sets/clears the `PrimaryColour` entry in `sub-ass-style-overrides` (ASS colour edit), preserving any entries from the user's mpv.conf |
+| `handleOscAction(verb, arg)` | 3284 | Handles actions from OSC. Verbs: `skip-segment`, `next-item`, `prev-item`, `set-sub`, `set-audio`, `set-sub-size`, `set-sub-position`, `set-sub-color`, `toggle-favorite`, `screenshot`, `set-fullscreen`, `unwatched-quit`, `syncplay-refresh`, `syncplay-join`, `syncplay-new`, `syncplay-disable`, `syncplay-toggle-pause` |
+| `pushOscState(hasMedia)` | 3389 | Pushes state blob to OSC (queue, favorites, tracks, subtitle styling) |
+| `pushOscSkipButton(label)` | 3515 | Pushes skip button label to OSC (or empty to hide) |
+| `toggleFavorite()` | 3575 | Toggles favorite via Jellyfin API and pushes updated state |
+| `setAssPrimaryColourOverride(colorOrNull)` | 620 | Sets/clears the `PrimaryColour` entry in `sub-ass-style-overrides` (ASS colour edit), preserving any entries from the user's mpv.conf |
 
 Note on `unwatched-quit`: quits without saving a resume position anywhere (no local save, stop report at position 0) and resets the item to unwatched in Jellyfin. The `sub_style` state reports MPV's live values, so mpv.conf settings show through as current; for ASS/SSA tracks the colour reads `Style` until one is forced, since their colour comes from the subtitle style rather than `sub-color`.
 
@@ -437,7 +438,7 @@ All state is module-level variables. No state machine or stores — just mutable
 ### Adding a new config option
 
 1. Add the option to `config.example.js` with a default value and comment
-2. Add it to the `CONFIG` object in `shim.js` (line 12-29): `optionName: userConfig.optionName || defaultValue`
+2. Add it to the `CONFIG` object in `shim.js` (search for `const CONFIG = {`): `optionName: userConfig.optionName || defaultValue`
 3. Use `CONFIG.optionName` throughout the code
 4. Add it to the macOS Settings panel (`macapp/Sources/PreferencesWindowController.swift`): field declaration, `setupUI` row, `loadConfig`, and `saveConfig` (`managedKeys` + a line appended only when non-empty for optional keys). Without this the option is invisible to Mac users. `tests/config.test.mjs` guards `apiKey` specifically.
 5. Update AGENTS.md config table, README.md, CONTRIBUTING.md if relevant
@@ -499,7 +500,7 @@ Use patterns like:
 - Config file location: `~/Library/Application Support/JellyfinMpvPlay/config.js`
 - Log file location: `~/Library/Application Support/JellyfinMpvPlay/data/jellyfin-mpv-play-*.log` (timestamped)
 
-### Linux (`linuxapp/` and `linux/`)
+### Linux (`linuxapp/`)
 
 **Tray app (`linuxapp/`)** — Python/GTK3 system tray application:
 - Uses AyatanaAppIndicator3 (falls back gracefully if `AyatanaAppIndicatorGlib` is available on newer distros)

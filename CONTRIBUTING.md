@@ -38,15 +38,24 @@ jellyfin-mpv-play/
 ├── shim.js                  # Main Node.js application (the entire shim)
 ├── config.example.js        # Configuration template
 ├── package.json
-├── macapp/
-│   ├── Sources/             # Swift source files (11 files)
-│   ├── Info.plist           # App metadata
-│   ├── AppIcon.icns         # App icon
-│   └── build.sh             # Build script
+├── .node-version            # Bundled Node.js pin
+├── macapp/                  # Native macOS menubar app
+│   ├── Sources/             #   Swift source files (11 files)
+│   ├── Info.plist           #   App metadata
+│   ├── AppIcon.icns         #   App icon
+│   └── build.sh             #   Build script
+├── linuxapp/                # Native Linux tray app
+│   ├── src/                 #   Python/GTK3 source files
+│   ├── headless/            #   Headless launcher + systemd service
+│   └── build.sh             #   Build script
+├── windows/                 # Windows launcher
+│   └── launch.bat
+├── tests/                   # Automated tests (npm test)
 ├── .github/
 │   ├── ISSUE_TEMPLATE/      # Bug report, feature request
 │   └── pull_request_template.md
 ├── AGENTS.md                # Agent context for AI assistants
+├── CHANGELOG.md
 ├── SECURITY.md
 └── README.md
 ```
@@ -91,7 +100,7 @@ The queue system manages playback of multiple items using MPV's native playlist.
 ### Important Flags
 
 - **`isNewQueueLoad`** — Set when loading a new queue; prevents `playlist-pos` handler from treating it as an auto-advance
-- **`isPlayingNext`** — Prevents double-triggering of episode transitions; has a 10s timeout fallback
+- **`isPlayingNext`** — Prevents double-triggering of episode transitions; has a 30s timeout fallback
 
 ### Log Line Contracts
 
@@ -107,7 +116,7 @@ The macOS app parses stdout from shim.js. These patterns must be preserved:
 ### Common Pitfalls
 
 - Never push to `playQueue` without also updating MPV's playlist
-- Clear `isPlayingNext` after 10s timeout in case `loadfile` silently fails
+- Clear `isPlayingNext` after 30s timeout in case `loadfile` silently fails
 - The `markedWatched` Set prevents duplicate API calls; clear it on each new file load
 
 ## macOS App Architecture
