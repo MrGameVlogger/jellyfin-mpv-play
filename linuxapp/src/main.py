@@ -31,7 +31,7 @@ class App:
         # Wire callbacks
         self.node_manager.log_handler = self._on_log
         self.node_manager.status_handler = self.tray.update_status
-        self.node_manager.notification_handler = notifications.show_notification
+        self.node_manager.notification_handler = lambda t, m: GLib.idle_add(notifications.show_notification, t, m)
 
         self.tray.on_show_preferences = self._show_preferences
         self.tray.on_show_about = self._show_about
@@ -109,7 +109,7 @@ class App:
         if self.node_manager.is_playing:
             dialog = Gtk.MessageDialog(
                 transient_for=None,
-                flags=0,
+                modal=True,
                 message_type=Gtk.MessageType.QUESTION,
                 buttons=Gtk.ButtonsType.YES_NO,
                 text="Quit while MPV is still playing?",

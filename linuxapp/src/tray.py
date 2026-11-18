@@ -55,7 +55,10 @@ class TrayController:
         node_manager.pause_state_handler = self._on_pause_state
 
     def update_status(self, status):
-        """Called by main when connection status changes."""
+        """Called from background threads when connection status changes."""
+        GLib.idle_add(self._set_status, status)
+
+    def _set_status(self, status):
         self.connection_state = status
         self._render()
 
@@ -229,7 +232,7 @@ class TrayController:
     def _show_alert(self, title, message):
         dialog = Gtk.MessageDialog(
             transient_for=None,
-            flags=0,
+            modal=True,
             message_type=Gtk.MessageType.WARNING,
             buttons=Gtk.ButtonsType.OK,
             text=title,

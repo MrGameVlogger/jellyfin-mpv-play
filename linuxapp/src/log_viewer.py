@@ -52,7 +52,6 @@ class LogViewerWindow:
         self.textview.set_cursor_visible(False)
         self.textview.set_monospace(True)
         self.textview.set_wrap_mode(Gtk.WrapMode.CHAR)
-        self.textview.override_font(Pango.FontDescription("Monospace 10"))
         self.textview.set_left_margin(8)
         self.textview.set_right_margin(8)
         self.textview.set_top_margin(8)
@@ -139,8 +138,8 @@ class LogViewerWindow:
             action=Gtk.FileChooserAction.SAVE,
         )
         dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_SAVE, Gtk.ResponseType.OK,
+            "_Cancel", Gtk.ResponseType.CANCEL,
+            "_Save", Gtk.ResponseType.OK,
         )
         dialog.set_do_overwrite_confirmation(True)
         stamp = time.strftime("%Y%m%d-%H%M%S")

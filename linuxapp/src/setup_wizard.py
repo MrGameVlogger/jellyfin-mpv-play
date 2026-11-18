@@ -553,7 +553,7 @@ class SetupWizardWindow(Gtk.Window):
     def _alert(self, title, message):
         dialog = Gtk.MessageDialog(
             transient_for=self,
-            flags=0,
+            modal=True,
             message_type=Gtk.MessageType.WARNING,
             buttons=Gtk.ButtonsType.OK,
             text=title,

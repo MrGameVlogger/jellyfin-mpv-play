@@ -2,13 +2,22 @@
 """About window for Jellyfin MPV Play.
 Port of macapp/Sources/AboutWindowController.swift for Linux/GTK3.
 """
+import json
 import os
 
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, GdkPixbuf
 
-VERSION = "1.17.2"
+def _get_version():
+    try:
+        pkg = os.path.join(os.path.dirname(__file__), "..", "package.json")
+        with open(pkg) as f:
+            return json.load(f).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+VERSION = _get_version()
 
 LINKS = (
     ("GitHub", "https://github.com/MrGameVlogger/jellyfin-mpv-play"),

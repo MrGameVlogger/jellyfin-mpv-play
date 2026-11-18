@@ -46,6 +46,12 @@ STATUS_COLORS = {
     "yellow": "#b8860b",
 }
 
+_STATUS_CSS = """
+.status-green  { color: #2e7d32; }
+.status-red    { color: #c62828; }
+.status-yellow { color: #b8860b; }
+"""
+
 
 
 def _rgba(spec):
@@ -59,6 +65,14 @@ class PreferencesWindow(Gtk.Window):
 
     def __init__(self, config_dir, on_save=None):
         super().__init__(title="Settings")
+
+        # Status color classes (replaces deprecated override_color)
+        css = Gtk.CssProvider()
+        css.load_from_data(_STATUS_CSS.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
         self.config_dir = config_dir
         self.on_save = on_save
         self._populating = False
@@ -394,12 +408,11 @@ class PreferencesWindow(Gtk.Window):
 
     def _set_status(self, text, color_key):
         self.status_label.set_text(text)
+        ctx = self.status_label.get_style_context()
+        for cls in ("status-green", "status-red", "status-yellow"):
+            ctx.remove_class(cls)
         if color_key:
-            self.status_label.override_color(
-                Gtk.StateFlags.NORMAL, _rgba(STATUS_COLORS[color_key])
-            )
-        else:
-            self.status_label.override_color(Gtk.StateFlags.NORMAL, None)
+            ctx.add_class("status-" + color_key)
 
     def _show_error_dialog(self, message, title="Missing required fields"):
         dialog = Gtk.MessageDialog(

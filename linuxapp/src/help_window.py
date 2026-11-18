@@ -26,7 +26,7 @@ class HelpWindow(Gtk.Window):
         self.box.set_margin_bottom(16)
         self.box.set_margin_start(20)
         self.box.set_margin_end(20)
-        scrolled.add_with_viewport(self.box)
+        scrolled.add(self.box)
 
         self._build_content()
 
@@ -111,7 +111,7 @@ class HelpWindow(Gtk.Window):
         self.box.pack_start(lbl, False, False, 2)
 
     def _separator(self):
-        sep = Gtk.SeparatorMenuItem()
+        sep = Gtk.Separator()
         self.box.pack_start(sep, False, False, 6)
 
     # -- Content -------------------------------------------------------
