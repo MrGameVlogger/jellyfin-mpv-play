@@ -2229,7 +2229,7 @@ function connectToMpvIpc(gen) {
         connectionAttempts++;
         
         if (!mpvProcess || mpvProcess.exitCode !== null) {
-            log('error', 'ipc', '❌ MPV not running, canceling IPC connection');
+            log('info', 'ipc', '🔌 MPV not running, canceling IPC connection');
             return;
         }
 
