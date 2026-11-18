@@ -4,6 +4,10 @@ Port of macapp/Sources/ConfigParser.swift for Linux/GTK.
 import os
 import re
 import json
+import urllib.request
+import urllib.error
+
+from typing import Optional
 
 APP_NAME = "JellyfinMpvPlay"
 
@@ -16,7 +20,8 @@ def app_support_dir():
     return d
 
 
-def config_path(file_name="config.js"):
+def config_path(file_name: str = "config.js") -> str:
+    """Returns the full path to a config file in the app data directory."""
     return os.path.join(app_support_dir(), file_name)
 
 
@@ -26,13 +31,15 @@ def selected_config_file_name():
     return settings.get("selectedConfigFile", "config.js")
 
 
-def set_selected_config_file_name(name):
+def set_selected_config_file_name(name: str) -> None:
+    """Persists the selected config file name to settings.json."""
     settings = _load_settings()
     settings["selectedConfigFile"] = name
     _save_settings(settings)
 
 
-def settings_path():
+def settings_path() -> str:
+    """Returns the path to settings.json."""
     return os.path.join(app_support_dir(), "settings.json")
 
 
@@ -62,7 +69,7 @@ def default_mpv_path():
     return "mpv"
 
 
-def strip_comments(text):
+def strip_comments(text: str) -> str:
     """Removes // comments (whole-line and trailing) while preserving URLs."""
     lines = text.split("\n")
     result = []
@@ -78,7 +85,7 @@ def strip_comments(text):
     return "\n".join(result)
 
 
-def extract_value(text, key):
+def extract_value(text: str, key: str) -> str:
     """Extracts a config value by key. Handles strings, arrays, booleans, numbers."""
     stripped = strip_comments(text)
     anchor = r'(?<![A-Za-z0-9_])' + re.escape(key) + r':'
@@ -112,7 +119,7 @@ def extract_value(text, key):
     return ""
 
 
-def _unescape_config_value(s):
+def _unescape_config_value(s: str) -> str:
     # Handle escaped characters. Use NUL placeholder so \\n doesn't double-decode.
     s = s.replace("\\x00", "\x00")
     s = s.replace("\\n", "\n")
@@ -125,7 +132,8 @@ def _unescape_config_value(s):
     return s
 
 
-def escape_config_value(s):
+def escape_config_value(s: str) -> str:
+    """Escapes a value for a single-quoted JS string literal."""
     s = s.replace("\\", "\\\\")
     s = s.replace("'", "\\'")
     s = s.replace("\n", "\\n")
@@ -134,13 +142,13 @@ def escape_config_value(s):
     return s
 
 
-def line_key(line):
+def line_key(line: str) -> Optional[str]:
     """Returns the config key for a line like '    serverUrl: ...' or None."""
     m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*):', line.strip())
     return m.group(1) if m else None
 
 
-def build_config(managed_keys, managed_lines, existing=None):
+def build_config(managed_keys: set, managed_lines: list, existing: Optional[str] = None) -> str:
     """Builds a config.js body, preserving unmanaged lines and comments.
 
     managed_keys: set of key names the UI owns.
@@ -169,9 +177,6 @@ def build_config(managed_keys, managed_lines, existing=None):
 
 def test_connection(server_url, username, password, device_id="test-device", device_name="Setup"):
     """Tests Jellyfin connection. Returns (success, message)."""
-    import urllib.request
-    import urllib.error
-
     url = server_url.strip().rstrip("/")
     if not url.startswith("http://") and not url.startswith("https://"):
         return (False, "Invalid URL: must start with http:// or https://")

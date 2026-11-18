@@ -5,6 +5,7 @@ import os
 import glob
 import time
 import socket
+import shutil
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ PLAYING = "playing"
 
 
 class NodeProcessManager:
+    """Manages the shim child process, parses stdout, and drives mpv IPC."""
     def __init__(self):
         self.process = None
         self.status = DISCONNECTED
@@ -91,7 +93,15 @@ class NodeProcessManager:
                 cwd=app_support_dir(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env={**os.environ, "NODE_PATH": os.path.join(app_support_dir(), "node_modules") + os.pathsep + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "node_modules")},
+                env={
+                    **os.environ,
+                    "NODE_PATH": os.path.join(app_support_dir(), "node_modules")
+                    + os.pathsep
+                    + os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "node_modules",
+                    ),
+                },
             )
             self._log(f"Started node shim.js (PID: {self.process.pid})")
         except Exception as e:
@@ -434,7 +444,6 @@ class NodeProcessManager:
             if not os.path.exists(dest):
                 src = os.path.join(bundle_dir, fname)
                 if os.path.exists(src):
-                    import shutil
                     shutil.copy2(src, dest)
         # Symlink node_modules so the shim can resolve ws/axios.
         # (Copying 50MB+ of node_modules is wasteful.)
@@ -444,14 +453,12 @@ class NodeProcessManager:
             try:
                 os.symlink(nm_src, nm_dest)
             except OSError:
-                import shutil
                 shutil.copytree(nm_src, nm_dest)
         # Create config.js from example if absent
         cfg = config_path()
         if not os.path.exists(cfg):
             example = os.path.join(d, "config.example.js")
             if os.path.exists(example):
-                import shutil
                 shutil.copy2(example, cfg)
 
     def _load_ipc_socket_path(self):

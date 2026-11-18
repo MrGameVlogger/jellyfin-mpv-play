@@ -2,6 +2,8 @@
 Port of macapp/Sources/StatusBarController.swift for Linux/GTK.
 """
 import os
+import subprocess
+
 import gi
 gi.require_version("Gtk", "3.0")
 
@@ -21,6 +23,7 @@ from node_manager import DISCONNECTED, CONNECTED, PLAYING
 
 
 class TrayController:
+    """System tray icon and menu, mirrors playback state to the panel."""
     def __init__(self, node_manager, log_viewer, config_dir):
         self.node_manager = node_manager
         self.log_viewer = log_viewer
@@ -186,7 +189,7 @@ class TrayController:
 
     def _on_copy_now_playing(self, _):
         if self.now_playing:
-            clipboard = Gtk.Clipboard.get(Gdk.Atom.intern("CLIPBOARD", False))
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(self.now_playing, -1)
 
     def _on_open_config(self, _):
@@ -221,7 +224,6 @@ class TrayController:
             self.on_show_help()
 
     def _open_path(self, path):
-        import subprocess
         subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _show_alert(self, title, message):

@@ -9,15 +9,21 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, GdkPixbuf
 
-def _get_version():
+
+VERSION = None  # lazy — populated by _get_version() on first use
+
+
+def _get_version() -> str:
+    global VERSION
+    if VERSION is not None:
+        return VERSION
     try:
         pkg = os.path.join(os.path.dirname(__file__), "..", "package.json")
         with open(pkg) as f:
-            return json.load(f).get("version", "unknown")
+            VERSION = json.load(f).get("version", "unknown")
     except Exception:
-        return "unknown"
-
-VERSION = _get_version()
+        VERSION = "unknown"
+    return VERSION
 
 LINKS = (
     ("GitHub", "https://github.com/MrGameVlogger/jellyfin-mpv-play"),
@@ -58,7 +64,7 @@ class AboutWindow:
         vbox.pack_start(title, False, False, 0)
 
         # --- Version ---
-        version_label = Gtk.Label(label="Version {}".format(VERSION))
+        version_label = Gtk.Label(label="Version {}".format(_get_version()))
         version_label.set_halign(Gtk.Align.CENTER)
         version_label.set_name("about-version")
         style = version_label.get_style_context()

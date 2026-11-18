@@ -47,7 +47,6 @@ _STATUS_CSS = """
 """
 
 
-
 class PreferencesWindow(Gtk.Window):
     """Settings form (hidden on close, reused across shows)."""
 
@@ -433,6 +432,7 @@ class PreferencesWindow(Gtk.Window):
             self._populating = False
 
     def load_config(self):
+        """Load current config values into the form fields."""
         try:
             with open(config_path(selected_config_file_name()), "r", encoding="utf-8") as f:
                 content = f.read()
@@ -493,6 +493,7 @@ class PreferencesWindow(Gtk.Window):
         return flags
 
     def save_config(self):
+        """Write form values to the config file and notify on_save."""
         server_url = self.server_url_entry.get_text().strip()
         username = self.username_entry.get_text().strip()
         password = self.password_entry.get_text()
@@ -511,9 +512,10 @@ class PreferencesWindow(Gtk.Window):
         if api_key:
             lines.append(f"    apiKey: '{escape_config_value(api_key)}',")
 
-        lines.append(f"    mpvPath: '{escape_config_value(self.mpv_path_entry.get_text().strip())}',")
-        lines.append(f"    deviceName: '{escape_config_value(self.device_name_entry.get_text().strip())}',")
-        lines.append(f"    deviceId: '{escape_config_value(self.device_id_entry.get_text().strip())}',")
+        e = escape_config_value
+        lines.append(f"    mpvPath: '{e(self.mpv_path_entry.get_text().strip())}',")
+        lines.append(f"    deviceName: '{e(self.device_name_entry.get_text().strip())}',")
+        lines.append(f"    deviceId: '{e(self.device_id_entry.get_text().strip())}',")
 
         ipc_path = self.ipc_socket_entry.get_text().strip()
         if ipc_path:

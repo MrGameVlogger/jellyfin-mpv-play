@@ -94,7 +94,7 @@ class LogViewerWindow:
     # ------------------------------------------------------------------ #
 
     def show(self):
-        """Present the window (creates it lazily on first use)."""
+        """Present the window and bring it to the front."""
         self.window.show_all()
         self.window.present()
 
@@ -134,7 +134,7 @@ class LogViewerWindow:
         """Export the raw log text to a file chosen via a save dialog."""
         dialog = Gtk.FileChooserDialog(
             title="Export Logs",
-            parent=self.window,
+            transient_for=self.window,
             action=Gtk.FileChooserAction.SAVE,
         )
         dialog.add_buttons(

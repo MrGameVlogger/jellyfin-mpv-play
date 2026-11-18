@@ -48,8 +48,17 @@ fi
 # ── Node.js ────────────────────────────────────────────────────────────
 NODE_VERSION="$(tr -d '[:space:]' < "$PROJECT_DIR/.node-version")"
 
-# Target architecture: --arch x86_64|arm64, or auto-detect from host
-TARGET_ARCH="${1:-$(uname -m)}"
+# Target architecture: first arg is x86_64|arm64, or auto-detect from host.
+# Second arg (optional) is --package to produce a tar.gz.
+TARGET_ARCH=""
+DO_PACKAGE=false
+for arg in "$@"; do
+    case "$arg" in
+        --package) DO_PACKAGE=true ;;
+        x86_64|amd64|aarch64|arm64) TARGET_ARCH="$arg" ;;
+    esac
+done
+TARGET_ARCH="${TARGET_ARCH:-$(uname -m)}"
 case "$TARGET_ARCH" in
     x86_64|amd64) NODE_ARCH="x64"; ARCH_LABEL="x86_64" ;;
     aarch64|arm64) NODE_ARCH="arm64"; ARCH_LABEL="arm64" ;;
@@ -61,7 +70,9 @@ NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}"
 
 echo "Bundling Node.js v${NODE_VERSION}..."
 if [ ! -d "$BUILD_DIR/node" ]; then
-    cd /tmp
+    TMPDIR_NODE="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR_NODE"' EXIT
+    cd "$TMPDIR_NODE"
     curl -fL --retry 3 --retry-delay 2 -o "$NODE_TARBALL" "$NODE_URL"
 
     # Verify checksum
@@ -184,7 +195,7 @@ echo "  Run directly:    $BUILD_DIR/jellyfin-mpv-play-tray"
 echo "  Install:         $BUILD_DIR/install.sh"
 
 # ── Package ────────────────────────────────────────────────────────────
-if [ "$2" = "--package" ]; then
+if [ "$DO_PACKAGE" = true ]; then
     PACKAGE_NAME="JellyfinMPVPlay-Linux-${ARCH_LABEL}-preview"
     PACKAGE_PATH="$PROJECT_DIR/build/${PACKAGE_NAME}.tar.gz"
     echo ""

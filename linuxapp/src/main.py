@@ -22,6 +22,7 @@ import notifications
 
 
 class App:
+    """Top-level application: wires node manager, tray, and windows together."""
     def __init__(self):
         self.config_dir = app_support_dir()
         self.node_manager = NodeProcessManager()
@@ -31,7 +32,9 @@ class App:
         # Wire callbacks
         self.node_manager.log_handler = self._on_log
         self.node_manager.status_handler = self.tray.update_status
-        self.node_manager.notification_handler = lambda t, m: GLib.idle_add(notifications.show_notification, t, m)
+        self.node_manager.notification_handler = (
+            lambda t, m: GLib.idle_add(notifications.show_notification, t, m)
+        )
 
         self.tray.on_show_preferences = self._show_preferences
         self.tray.on_show_about = self._show_about

@@ -138,7 +138,7 @@ class SetupWizardWindow(Gtk.Window):
 
         self.continue_btn = Gtk.Button()
         self.continue_btn.connect("clicked", self._on_continue)
-        self.continue_btn.get_style_context().add_class("suggested-action")
+        self.continue_btn.get_style_context().add_class(Gtk.STYLE_CLASS_SUGGESTED_ACTION)
         btn_row.pack_start(self.continue_btn, False, False, 0)
 
         outer.pack_start(btn_row, False, False, 0)
@@ -449,7 +449,7 @@ class SetupWizardWindow(Gtk.Window):
     def _on_browse_mpv(self, *_):
         dialog = Gtk.FileChooserDialog(
             title="Select MPV Binary",
-            parent=self,
+            transient_for=self,
             action=Gtk.FileChooserAction.OPEN,
         )
         dialog.add_buttons(
