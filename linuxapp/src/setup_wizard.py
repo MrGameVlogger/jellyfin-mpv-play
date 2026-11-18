@@ -114,10 +114,10 @@ class SetupWizardWindow(Gtk.Window):
         outer.pack_start(self.subtitle_label, False, False, 0)
 
         # Middle container whose content is swapped per step.
-        self.container = Gtk.Box()
-        self.container.set_orientation(Gtk.Orientation.VERTICAL)
-        self.container.set_spacing(10)
-        outer.pack_start(self.container, True, True, 12)
+        self.step_box = Gtk.Box()
+        self.step_box.set_orientation(Gtk.Orientation.VERTICAL)
+        self.step_box.set_spacing(10)
+        outer.pack_start(self.step_box, True, True, 12)
 
         # Bottom button row: Skip (left), Back (center), Continue (right).
         btn_row = Gtk.Box()
@@ -161,8 +161,8 @@ class SetupWizardWindow(Gtk.Window):
     # -- Step management -----------------------------------------------
 
     def _clear_container(self):
-        for child in self.container.get_children():
-            self.container.remove(child)
+        for child in self.step_box.get_children():
+            self.step_box.remove(child)
 
     def _capture_fields(self):
         if self.server_field is not None:
@@ -226,7 +226,7 @@ class SetupWizardWindow(Gtk.Window):
             label = Gtk.Label(label=text)
             label.set_xalign(0)
             row.pack_start(label, False, False, 0)
-            self.container.pack_start(row, False, False, 0)
+            self.step_box.pack_start(row, False, False, 0)
 
     def _step_server(self):
         self.title_label.set_markup(self._title("Connect to Your Server"))
@@ -259,7 +259,7 @@ class SetupWizardWindow(Gtk.Window):
         help_lbl.set_line_wrap(True)
         form.pack_start(help_lbl, False, False, 0)
 
-        self.container.pack_start(form, False, False, 0)
+        self.step_box.pack_start(form, False, False, 0)
         self.server_field.grab_focus()
 
     def _step_credentials(self):
@@ -311,7 +311,7 @@ class SetupWizardWindow(Gtk.Window):
         test_row.pack_start(self.status_label, True, True, 0)
         form.pack_start(test_row, False, False, 0)
 
-        self.container.pack_start(form, False, False, 0)
+        self.step_box.pack_start(form, False, False, 0)
         self.username_field.grab_focus()
 
     def _step_mpv(self):
@@ -374,7 +374,7 @@ class SetupWizardWindow(Gtk.Window):
         help_lbl.set_line_wrap(True)
         form.pack_start(help_lbl, False, False, 0)
 
-        self.container.pack_start(form, False, False, 0)
+        self.step_box.pack_start(form, False, False, 0)
 
     def _step_finish(self):
         self.title_label.set_markup(self._title("Ready to start"))
@@ -400,7 +400,7 @@ class SetupWizardWindow(Gtk.Window):
             lbl.set_xalign(0)
             lbl.set_line_wrap(True)
             card.pack_start(lbl, True, True, 0)
-            self.container.pack_start(card, False, False, 0)
+            self.step_box.pack_start(card, False, False, 0)
 
     # -- Navigation / actions ------------------------------------------
 
