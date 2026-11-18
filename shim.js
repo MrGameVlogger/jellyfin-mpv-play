@@ -774,7 +774,8 @@ async function authenticateUser() {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': authHeader
-                }
+                },
+                timeout: 15000
             }
         );
 
