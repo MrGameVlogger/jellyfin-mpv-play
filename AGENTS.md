@@ -36,6 +36,21 @@ For example, if the user asks you to fix a bug:
 
 **Do NOT** immediately commit, push, create PR, and merge in one shot. The user needs time to review your analysis and catch mistakes before they become permanent commits.
 
+## Skills to load proactively
+
+Load these skills when the task matches — don't wait to be asked:
+
+| When doing... | Load skill | Why |
+|---------------|-----------|-----|
+| Reviewing or self-reviewing a diff | `code-review` | Structured pass (intent → correctness → errors → security → concurrency → tests) with severity prefixes |
+| Debugging a bug or failure | `systematic-debugging` | Hypothesis-driven diagnosis before proposing fixes |
+| About to claim work is done | `verification-before-completion` | Run verification commands and confirm output before making success claims |
+| Writing a release / version bump | `release-workflow` | Project-specific release steps (`.opencode/skills/release-workflow/`) |
+| Making an architectural decision | `grill-me` | Interview the user about tradeoffs before writing code |
+| Writing shell scripts | `shell-scripting` | `set -euo pipefail`, quoting traps, ShellCheck |
+| Writing prose (docs, changelog) | `unslop` + `deslop` | Remove AI writing patterns |
+| About to implement a feature | `test-driven-development` | Write failing test first |
+
 ## What this is
 
 Node.js shim (`shim.js`) that connects to Jellyfin via WebSocket, receives play commands, and controls MPV via Unix socket IPC. Two native UIs wrap it: a macOS menubar app (`macapp/`, Swift) and a Linux system tray app (`linuxapp/`, Python/GTK3). Windows and headless Linux users run `shim.js` directly via launcher scripts.
