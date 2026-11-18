@@ -439,12 +439,13 @@ class NodeProcessManager:
         # Copy shim.js and package.json from the bundle if not present.
         # Bundle layout: <bundle>/src/node_manager.py, <bundle>/shim.js, etc.
         bundle_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Copy managed files from the bundle — always overwrite (like the
+        # macOS app's setupApplicationSupport). Only config.js is preserved.
         for fname in ("shim.js", "package.json", "config.example.js"):
             dest = os.path.join(d, fname)
-            if not os.path.exists(dest):
-                src = os.path.join(bundle_dir, fname)
-                if os.path.exists(src):
-                    shutil.copy2(src, dest)
+            src = os.path.join(bundle_dir, fname)
+            if os.path.exists(src):
+                shutil.copy2(src, dest)
         # Symlink node_modules so the shim can resolve ws/axios.
         # (Copying 50MB+ of node_modules is wasteful.)
         nm_dest = os.path.join(d, "node_modules")
