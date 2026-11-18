@@ -205,11 +205,11 @@ class TrayController:
         if os.path.isdir(self.config_dir):
             self._open_path(self.config_dir)
 
-    def _on_restart(self, _):
+    def _on_restart(self):
         if self.on_restart:
             self.on_restart()
 
-    def _on_quit(self, _):
+    def _on_quit(self):
         if self.on_quit:
             self.on_quit()
 
