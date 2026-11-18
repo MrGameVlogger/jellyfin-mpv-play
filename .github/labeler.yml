@@ -39,6 +39,8 @@ linux:
   - changed-files:
     - any-glob-to-any-file:
       - 'linux/**'
+      - 'linuxapp/**'
+      - '**/*.py'
 
 windows:
   - changed-files:

@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-This is a Jellyfin MPV Play project — a Node.js shim that connects to Jellyfin via WebSocket and controls MPV via Unix socket IPC, with an optional native macOS menubar app.
+This is a Jellyfin MPV Play project — a Node.js shim that connects to Jellyfin via WebSocket and controls MPV via Unix socket IPC, with native macOS menubar and Linux tray apps.
 
 ## Key Review Principles
 
-1. **Log messages are contracts** — stdout is parsed by the macOS app. Changing log message patterns will silently break the app. See AGENTS.md for the full list.
+1. **Log messages are contracts** — stdout is parsed by the macOS and Linux apps. Changing log message patterns will silently break both. See AGENTS.md for the full list.
 
 2. **Tests exist but are limited** — `npm test` runs log-contract and config tests. Changes still need extra scrutiny since coverage is minimal.
 
-3. **Thread safety matters** — The macOS app dispatches `processLogLine` to the main thread from a background thread. UI updates must happen on the main thread.
+3. **Thread safety matters** — Both native apps dispatch log parsing to the main thread from background threads. UI updates must happen on the main thread (GTK: via `GLib.idle_add`; Swift: via `DispatchQueue.main.async`).
 
 4. **IPC race conditions** — MPV IPC communication uses async callbacks and a poll timer. Race conditions and hanging promises are common failure modes.
 
@@ -35,7 +35,8 @@ This is a Jellyfin MPV Play project — a Node.js shim that connects to Jellyfin
 
 - CommonJS modules (require/module.exports)
 - No build step for Node.js code
-- Swift code targets macOS 13.0+
+- Swift code targets macOS 13.5+
+- Python code targets 3.8+ (GTK3/PyGObject)
 - MPV arguments are minimal — user's mpv.conf handles most settings
 - IPC socket defaults to `$XDG_RUNTIME_DIR` on Linux
 - Multi-config support: `node shim.js config.work.js`
