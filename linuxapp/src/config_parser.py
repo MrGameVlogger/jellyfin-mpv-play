@@ -4,12 +4,54 @@ Port of macapp/Sources/ConfigParser.swift for Linux/GTK.
 import os
 import re
 import json
+import base64
+import hashlib
+import socket
+import getpass
 import urllib.request
 import urllib.error
 
 from typing import Optional
 
 APP_NAME = "JellyfinMpvPlay"
+
+
+# ── Sensitive value encryption ─────────────────────────────────────────
+# Passwords and API keys are XOR-encrypted with a machine-derived key
+# before being written to config.js. The key is SHA-256(hostname:username).
+# This is obfuscation, not strong encryption — use full-disk encryption
+# for real protection. But it satisfies "not stored in clear text" and
+# protects against casual filesystem access (backups, other users).
+
+def _derive_key() -> bytes:
+    material = f"{socket.gethostname()}:{getpass.getuser()}:jf-mpv-play"
+    return hashlib.sha256(material.encode("utf-8")).digest()
+
+
+def encrypt_value(plaintext: str) -> str:
+    """Encrypt a sensitive string for storage in config.js."""
+    if not plaintext:
+        return plaintext
+    key = _derive_key()
+    data = plaintext.encode("utf-8")
+    encrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+    return "enc:" + base64.b64encode(encrypted).decode("ascii")
+
+
+def decrypt_value(value: str) -> str:
+    """Decrypt a sensitive string read from config.js.
+
+    Values without the 'enc:' prefix are returned as-is (backward compatible).
+    """
+    if not value or not isinstance(value, str) or not value.startswith("enc:"):
+        return value
+    try:
+        key = _derive_key()
+        data = base64.b64decode(value[4:])
+        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+        return decrypted.decode("utf-8")
+    except Exception:
+        return value
 
 
 def app_support_dir():

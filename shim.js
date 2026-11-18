@@ -39,11 +39,32 @@ const pkg = require('./package.json');
 // Jellyfin time is in 100ns ticks — 10,000,000 ticks per second
 const TICKS_PER_SECOND = 10000000;
 
+// Decrypt sensitive config values (password, apiKey) stored as enc:base64
+// by the setup wizard / preferences UI. Machine-derived XOR key matching
+// linuxapp/src/config_parser.py encrypt_value(). Values without the enc:
+// prefix are returned as-is (backward compatible with plain text).
+function decryptConfigValue(value) {
+    if (!value || typeof value !== 'string' || !value.startsWith('enc:')) return value;
+    try {
+        const os = require('os');
+        const material = `${os.hostname()}:${os.userInfo().username}:jf-mpv-play`;
+        const key = crypto.createHash('sha256').update(material).digest();
+        const data = Buffer.from(value.slice(4), 'base64');
+        const decrypted = Buffer.alloc(data.length);
+        for (let i = 0; i < data.length; i++) {
+            decrypted[i] = data[i] ^ key[i % key.length];
+        }
+        return decrypted.toString('utf8');
+    } catch {
+        return value;
+    }
+}
+
 const CONFIG = {
     serverUrl: userConfig.serverUrl,
     username: userConfig.username,
-    password: userConfig.password,
-    apiKey: userConfig.apiKey || '',
+    password: decryptConfigValue(userConfig.password),
+    apiKey: decryptConfigValue(userConfig.apiKey) || '',
     mpvPath: userConfig.mpvPath,
     deviceName: userConfig.deviceName,
     deviceId: userConfig.deviceId || generateOrLoadDeviceId(),
