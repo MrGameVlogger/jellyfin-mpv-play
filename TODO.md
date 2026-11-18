@@ -33,7 +33,7 @@ Features, bugs, and improvements planned for Jellyfin MPV Play.
 | SetShuffleQueue | v1.11.0 | Server can shuffle the queue |
 | SetSubtitleDelay | v1.11.0 | Server can adjust subtitle timing |
 | SetAudioDelay | v1.11.0 | Server can adjust audio timing |
-| Multi-config support | v1.11.1 | `node shim.js config.work.js`, config file selector in macOS Preferences |
+| Multi-config support | v1.11.2 | `node shim.js config.work.js`, config file selector in macOS Preferences |
 | Secrets redaction | v1.11.1 | API keys/tokens masked in log output |
 | XDG_RUNTIME_DIR | v1.11.1 | IPC socket defaults to `$XDG_RUNTIME_DIR` on Linux |
 | Stale IPC socket cleanup | v1.11.1 | Cleans up stale sockets before spawning mpv |

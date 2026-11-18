@@ -102,15 +102,26 @@ if [ ! -d "$BUILD_DIR/node" ]; then
 
     # Bundle libatomic.so.1 (Node 25+ Linux binaries link against it; minimal
     # distros may lack it). Pinned Ubuntu 24.04 package, SHA256-verified.
-    if [ "$NODE_ARCH" = "x64" ]; then
+    case "$NODE_ARCH" in
+        x64)
+            LIBATOMIC_URL="http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb"
+            LIBATOMIC_SHA256="fe49cbbc7be753528380c724a8eef5f1e31dffa9221f692c5069048d81c7449d"
+            LIBATOMIC_LIBDIR="usr/lib/x86_64-linux-gnu"
+            ;;
+        arm64)
+            LIBATOMIC_URL="http://ports.ubuntu.com/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_arm64.deb"
+            LIBATOMIC_SHA256="fdeab74e7ad8572cf69c7024e8040c7ac851f6e667d35f0d429e7a0352840f73"
+            LIBATOMIC_LIBDIR="usr/lib/aarch64-linux-gnu"
+            ;;
+        *) echo "WARNING: No libatomic bundle for $NODE_ARCH" >&2; LIBATOMIC_URL="" ;;
+    esac
+    if [ -n "$LIBATOMIC_URL" ]; then
         echo "Bundling libatomic..."
-        LIBATOMIC_URL="http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-14/libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb"
-        LIBATOMIC_SHA256="fe49cbbc7be753528380c724a8eef5f1e31dffa9221f692c5069048d81c7449d"
         curl -fsSL --retry 3 --retry-delay 2 "$LIBATOMIC_URL" -o "$TMPDIR_NODE/libatomic1.deb"
         echo "$LIBATOMIC_SHA256  $TMPDIR_NODE/libatomic1.deb" | sha256sum -c -
         mkdir -p "$TMPDIR_NODE/libatomic-extract" "$BUILD_DIR/lib"
         cd "$TMPDIR_NODE/libatomic-extract" && ar x "$TMPDIR_NODE/libatomic1.deb" && tar --zstd -xf data.tar.zst
-        cp usr/lib/x86_64-linux-gnu/libatomic.so.1* "$BUILD_DIR/lib/"
+        cp "$LIBATOMIC_LIBDIR/libatomic.so.1"* "$BUILD_DIR/lib/"
         cd "$TMPDIR_NODE"
     fi
 fi
