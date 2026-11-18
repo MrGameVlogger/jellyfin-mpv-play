@@ -2343,10 +2343,13 @@ function connectToMpvIpc(gen) {
         });
 
         sock.on('error', (err) => {
-            // Socket drops while stopping/shutting down are expected — mpv is
-            // gone and the socket naturally resets. Not an error.
+            // Socket resets (ECONNRESET/EPIPE/EOF) happen naturally when mpv
+            // exits — the process exit event fires AFTER the socket drops, so
+            // state flags aren't reliable here. Connection-reset codes are the
+            // signal that the peer went away.
             const isExpectedDrop = isStoppingPlayback || isShuttingDown ||
-                !mpvProcess || mpvProcess.exitCode !== null;
+                !mpvProcess || mpvProcess.exitCode !== null ||
+                /ECONNRESET|EPIPE|EOF|ERR_STREAM/.test(err.message);
             if (isExpectedDrop) {
                 log('info', 'ipc', `🔌 IPC socket closed: ${err.message}`);
             } else {
