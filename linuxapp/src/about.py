@@ -19,7 +19,7 @@ def _get_version() -> str:
         return VERSION
     try:
         pkg = os.path.join(os.path.dirname(__file__), "..", "package.json")
-        with open(pkg) as f:
+        with open(pkg, encoding="utf-8") as f:
             VERSION = json.load(f).get("version", "unknown")
     except Exception:
         VERSION = "unknown"

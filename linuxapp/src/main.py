@@ -59,7 +59,7 @@ class App:
 
     def _needs_setup(self):
         try:
-            with open(config_path(selected_config_file_name())) as f:
+            with open(config_path(selected_config_file_name()), encoding="utf-8") as f:
                 text = f.read()
             return not (
                 extract_value(text, "serverUrl")
