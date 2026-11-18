@@ -23,9 +23,6 @@ All notable changes to Jellyfin MPV Play are documented here.
 ### Bug Fixes
 - **Fixed arm64 Linux tray bundle missing libatomic** — The arm64 tray bundle did not include `libatomic.so.1` (required by Node.js 25+), so it could fail on minimal distros. Both x86_64 and arm64 bundles now ship it.
 
-### Internal
-- **Fixed TODO.md version attribution** — Multi-config support is v1.11.2, not v1.11.1.
-
 ---
 
 ## v1.18.0
