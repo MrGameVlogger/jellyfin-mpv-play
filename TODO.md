@@ -38,6 +38,33 @@ Features, bugs, and improvements planned for Jellyfin MPV Play.
 | XDG_RUNTIME_DIR | v1.11.1 | IPC socket defaults to `$XDG_RUNTIME_DIR` on Linux |
 | Stale IPC socket cleanup | v1.11.1 | Cleans up stale sockets before spawning mpv |
 | `--cache=yes` | v1.11.1 | Better buffering for network streams |
+| Queue semantics overhaul | v1.12.0 | playlist-clear fix, track-index mapping, shuffle preservation, series-start-on-special fix, watched-mark timing |
+| Apple HIG compliance (macOS) | v1.12.0 | Main menu, Settings naming, dialog button order, setup wizard escapes |
+| Movies/music Now Playing | v1.12.0 | Title and controls now populate for non-episode items |
+| Config save safety (macOS) | v1.12.0 | Settings panel merges instead of overwriting; preserves comments and unrecognized keys |
+| Live E2E test suite | v1.12.0 | 25 automated tests against real Jellyfin + real mpv (`npm run test:e2e`) |
+| Orphaned mpv reaper | v1.12.3 | Quits leftover mpv processes on startup from crashed runs |
+| Presence WebSocket | v1.13.0 | Second WS connection keeps web UI cast alive across single-socket drops |
+| Dead-connection watchdog | v1.13.0 | Protocol pings every 15s, force-close after 35s of silence |
+| Fast reconnect | v1.13.0 | 1s server-probe loop, reconnects the moment the server answers |
+| Named playlist entries | v1.14.0 | M3U-based loading so OSC shows titles, not raw stream URLs |
+| External stream loading | v1.14.0 | Sidecar subtitle/audio streams added per file with Jellyfin display names |
+| Explicit track-index mapping | v1.14.0 | Jellyfin Index ↔ mpv aid/sid via `track-list` ff-index (fixes wrong-track selection) |
+| Report ordering fix | v1.14.0 | Playback reports serialized so stop/progress/start reach server in order |
+| Stale-async guards | v1.14.0 | Generation tokens prevent wrong-file mutations and race conditions |
+| Stable API key for media URLs | v1.16.0 | `apiKey` config option survives token reauth mid-session |
+| Revoked-token recovery | v1.16.0 | 401 triggers reauthenticate-and-retry instead of silent death |
+| Completed-episode resume fix | v1.16.0 | Finished episodes end `Played=true` with no resume position anywhere |
+| Scrobbler sync (playedToCompletion) | v1.16.1 | Completed items report `playedToCompletion=true` for jellyfin-ani-sync etc. |
+| Bundled Node.js 24 LTS | v1.15.0 | 24.22.1 across all bundles; automated LTS tracking workflow |
+| Bundled Node.js 26 LTS | v1.17.0 | 26.13.0 ("Lithium", supported to Apr 2029) |
+| Linux self-contained bundle | v1.17.1 | Bundled `libatomic.so.1` (no system packages beyond MPV needed) |
+| macOS minimum-version honesty | v1.17.2 | Declares real floor (13.5), probes bundled Node with `--version` fallback |
+| Linux tray application | v1.18.0 | GTK3 + AyatanaAppIndicator3 system tray app (setup wizard, settings, logs, notifications) |
+| OSD reset to mpv defaults | v1.18.0 | Font size/alignment restore to 30/left/top after DisplayMessage |
+| AudioBook/Trailer playback | v1.18.0 | Both added to playable types |
+| arm64 Linux bundle | v1.18.0 | Pre-built tray bundles for x86_64 and arm64 |
+| arm64 libatomic bundling | v1.18.1 | arm64 tray bundle ships `libatomic.so.1` (was x86_64-only) |
 
 ---
 
