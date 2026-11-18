@@ -18,7 +18,28 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
-## v1.17.2
+## v1.18.0
+
+### New Features
+- **Linux tray application** — A native system tray app for Linux (GTK3 + AyatanaAppIndicator3), a full port of the macOS menubar app. Includes setup wizard, settings editor, live log viewer, desktop notifications, and auto-restart on crash. Install with `./install.sh` or run directly. Supports Debian/Ubuntu, Fedora, Arch, and openSUSE. Pre-built bundles for x86_64 and arm64.
+
+### Bug Fixes
+- **OSD text resets to mpv defaults** — After a DisplayMessage or skip prompt, the OSD font size and alignment now restore to mpv's actual defaults (30/left/top) instead of incorrect fallbacks (55/center/bottom). Pending OSD restores are no longer lost when messages overlap.
+- **AudioBook and Trailer items now play** — Both are playable AV media (AudioBook subclasses Audio, Trailer subclasses Video) but were being rejected as non-playable by the type filter.
+- **IPC socket drops handled gracefully** — Closing mpv directly (e.g. clicking the window's X) no longer logs a spurious `ECONNRESET` error. Expected drops during shutdown are logged at info level instead of error level.
+
+### Security
+- **ws 8.22.0 → 8.23.0** — Fixes a remote memory exhaustion DoS vulnerability (a malicious peer could flood Ping frames and exhaust memory).
+- **axios 1.21.0 → 1.21.1** — Raises follow-redirects to 1.16.2 (CVE-2026-116689, custom credentials could follow redirects in older versions).
+
+### Internal
+- **Bundled Node.js bumped to 26.13.1** (LTS patch).
+- **mpv 0.42.0 compatibility** — Verified all IPC commands and properties; added `--tls-verify=no` guidance for HTTPS with self-signed certs (mpv 0.42 enables TLS verification by default). `append+play` flag requires mpv ≥ 0.42.
+- **macOS setup wizard copy polish** — Removed greeting headlines and exclamation marks from the first-run wizard.
+- **CI: pre-release tags skip version validation** — Tags with a `-` suffix (e.g. `v1.18.0-preview`) no longer fail the build workflow's tag-version check.
+- **Linux tray app code quality** — GTK3 best-practice compliance (threading, deprecated APIs removed), PEP 8, type hints, XDG Base Directory spec compliance, desktop entry spec compliance.
+
+---
 
 ### Bug Fixes
 - **macOS: the app now states its real minimum (13.5) and recovers when the bundled Node can't run.** The app advertised macOS 13.0 but the bundled Node.js binary requires 13.5 (true since v1.15.0 — both Node 24 and 26 carry that floor) — on 13.0–13.4 the app launched, picked the bundled runtime, and died at dyld load with a confusing error while the system-node fallback never fired (it only handled a *missing* binary). The floor is now honest (OS refuses cleanly at launch), and the node lookup probes each candidate with a `--version` run before accepting it — falling back to system/nvm node if the bundled one can't execute (also covers architecture mismatches and future runtime floor bumps).
