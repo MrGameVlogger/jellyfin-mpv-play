@@ -547,6 +547,7 @@ class PreferencesWindow(Gtk.Window):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
+            os.chmod(path, 0o600)
         except OSError as e:
             self._show_error_dialog(str(e), title="Failed to save config")
             return
