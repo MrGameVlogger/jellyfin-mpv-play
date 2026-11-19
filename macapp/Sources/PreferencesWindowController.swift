@@ -463,7 +463,7 @@ class PreferencesWindowController: NSWindowController {
         var lines: [String] = [
             "    serverUrl: '\(ConfigParser.escapeConfigValue(serverUrlField.stringValue))',",
             "    username: '\(ConfigParser.escapeConfigValue(usernameField.stringValue))',",
-            "    password: '\(ConfigParser.escapeConfigValue(passwordField.stringValue))',",
+            "    password: '\(ConfigParser.encryptValue(passwordField.stringValue))',",
             "    mpvPath: '\(ConfigParser.escapeConfigValue(mpvPathField.stringValue))',",
             "    deviceName: '\(ConfigParser.escapeConfigValue(deviceNameField.stringValue))',",
             "    deviceId: '\(ConfigParser.escapeConfigValue(deviceIdField.stringValue))',",
@@ -472,7 +472,7 @@ class PreferencesWindowController: NSWindowController {
         // Optional — omitted when empty, so the shim falls back to the login token.
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespaces)
         if !apiKey.isEmpty {
-            lines.append("    apiKey: '\(ConfigParser.escapeConfigValue(apiKey))',")
+            lines.append("    apiKey: '\(ConfigParser.encryptValue(apiKey))',")
         }
 
         let ipcPath = ipcSocketPathField.stringValue.trimmingCharacters(in: .whitespaces)

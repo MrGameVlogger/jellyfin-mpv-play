@@ -389,7 +389,7 @@ class SetupWindowController: NSWindowController, NSWindowDelegate {
         let lines: [String] = [
             "    serverUrl: '\(ConfigParser.escapeConfigValue(server))',",
             "    username: '\(ConfigParser.escapeConfigValue(user))',",
-            "    password: '\(ConfigParser.escapeConfigValue(pass))',",
+            "    password: '\(ConfigParser.encryptValue(pass))',",
             "    mpvPath: '\(ConfigParser.escapeConfigValue(mpv))',",
             "    deviceName: '\(ConfigParser.escapeConfigValue(name))',",
             "    deviceId: '\(ConfigParser.escapeConfigValue(id))',",
