@@ -18,6 +18,25 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.18.2
+
+### Security
+- **Config.js passwords and API keys are now encrypted** — Sensitive values are encrypted with Fernet (AES-128-CBC + HMAC-SHA256) before writing to config.js on all platforms. PBKDF2 key derivation (390k iterations, OWASP recommendation). Decrypted transparently at startup. Backward compatible — plain-text values still work.
+- **Config.js file permissions hardened** — Written with `0600` (owner-only read/write) on macOS and Linux after saving credentials.
+
+### Bug Fixes
+- **Fixed 3 floating promise chains** — Unhandled `.then()` callbacks without `.catch()` could crash the shim via `uncaughtException`. All three now have error handling.
+- **Added 15s timeout to authentication request** — A hung Jellyfin server could block startup indefinitely.
+
+### New
+- **Windows: `encrypt-config.js` script** — Encrypts password/apiKey in config.js. Run `node encrypt-config.js` after editing config. Already-encrypted values are skipped.
+
+### Internal
+- CodeQL: all 21 alerts closed as "fixed" (security, sanitization, encryption)
+- Build scripts use `set -euo pipefail` consistently
+
+---
+
 ## v1.18.1
 
 ### Bug Fixes
