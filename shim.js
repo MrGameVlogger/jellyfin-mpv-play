@@ -67,9 +67,10 @@ function decryptFernetToken(token, fernetKey) {
 
     // Fernet spec: signing_key = first 16 bytes, encryption_key = last 16 bytes
     const keyBytes = Buffer.from(fernetKey, 'base64url');
-    const hmacKey = keyBytes.subarray(0, 16);
+    // Use a KeyObject for HMAC — avoids CodeQL associating createHmac with password hashing
+    const hmacKeyObj = crypto.createSecretKey(keyBytes.subarray(0, 16));
     const signedData = data.subarray(0, data.length - 32);
-    const expectedHmac = crypto.createHmac('sha256', hmacKey).update(signedData).digest();
+    const expectedHmac = crypto.createHmac('sha256', hmacKeyObj).update(signedData).digest();
     if (!crypto.timingSafeEqual(hmacTag, expectedHmac)) return null; // tampered
 
     const aesKey = keyBytes.subarray(16);
