@@ -643,6 +643,7 @@ Both `uncaughtException` and `unhandledRejection` handlers call `shutdown()` to 
 ## Security considerations
 
 - `config.js` is gitignored — contains server credentials
+- **Config.js passwords and API keys are encrypted at rest** — Fernet (AES-128-CBC + HMAC-SHA256) with PBKDF2 key derivation (390k iterations, OWASP). Key derived from machine identity (hostname:username:jf-mpv-play). Encrypted values start with `enc:`. Backward compatible — plain text still works. All platforms encrypt (macOS Swift `ConfigParser.encryptValue`, Linux Python `get_fernet().encrypt`, Windows `encrypt-config.js` script) and shim.js decrypts via `fernet` npm package. Written with `chmod 0o600` after saving.
 - `data/jellyfin_token_{deviceId}.json` contains JWT tokens — never commit
 - `data/.device-id` is machine-specific — never commit
 - API tokens are logged in `getAuthHeaders()` debug output — be careful with logging
