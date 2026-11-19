@@ -699,6 +699,8 @@ let displayMessageOriginalFontSize = null;
 let displayMessageOriginalAlignX = null;
 let displayMessageOriginalAlignY = null;
 let isNewQueueLoad = false;
+let sessionConflictCount = 0;
+let deviceIdRenamed = false;
 let queueLoadCounter = 0;
 let isPlayingNextTimestamp = 0;
 let isShuttingDown = false;
@@ -913,6 +915,7 @@ function connectSocket(sock) {
     log('info', 'ws', sock.role === 'presence' ? '🔌 Connecting presence socket...' : '🔌 Connecting to Jellyfin...');
 
     try {
+        sock.connectedAt = Date.now();
         sock.ws = new WebSocket(wsUrl);
 
         sock.ws.on('open', () => {
@@ -1040,8 +1043,28 @@ function connectSocket(sock) {
             const now = Date.now();
             const sinceLastMessage = sock.lastMessageReceivedAt ? Math.round((now - sock.lastMessageReceivedAt) / 1000) : 'unknown';
             const sinceLastKeepAlive = sock.lastKeepAliveSentAt ? Math.round((now - sock.lastKeepAliveSentAt) / 1000) : 'unknown';
+            const connectionAge = sock.connectedAt ? (now - sock.connectedAt) : Infinity;
             log('info', 'ws', `${sock.role === 'presence' ? 'Presence socket disconnected' : 'Disconnected from server'} — code: ${code}, reason: "${reason || 'none'}", since last message: ${sinceLastMessage}s, since last keepalive: ${sinceLastKeepAlive}s`);
             sock.isReconnecting = false;
+
+            // Detect duplicate-session conflict: if we get "System Shutdown"
+            // within 3 seconds of connecting, another instance is likely using
+            // the same deviceId and the server is kicking us. After 2 consecutive
+            // conflicts, rename the deviceId to avoid the collision.
+            if (code === 1000 && reason && reason.toString().includes('System Shutdown') && connectionAge < 3000) {
+                sessionConflictCount++;
+                log('warn', 'ws', `⚠️ Session conflict detected (kicked ${Math.round(connectionAge/1000*10)/10}s after connect) — conflict #${sessionConflictCount}`);
+                if (sessionConflictCount >= 2 && !deviceIdRenamed) {
+                    const baseId = CONFIG.deviceId.replace(/-\d+$/, '');
+                    const newId = `${baseId}-${Math.floor(Math.random() * 900) + 100}`;
+                    log('warn', 'ws', `⚠️ Another instance is using deviceId "${CONFIG.deviceId}" — switching to "${newId}"`);
+                    CONFIG.deviceId = newId;
+                    deviceIdRenamed = true;
+                    sessionConflictCount = 0;
+                }
+            } else if (connectionAge >= 3000) {
+                sessionConflictCount = 0; // stable connection resets the counter
+            }
 
             if (sock.keepAliveInterval) {
                 clearInterval(sock.keepAliveInterval);
