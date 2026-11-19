@@ -48,7 +48,9 @@ function decryptConfigValue(value) {
     try {
         const os = require('os');
         const material = `${os.hostname()}:${os.userInfo().username}:jf-mpv-play`;
-        const rawKey = crypto.createHash('sha256').update(material).digest();
+        const salt = 'jf-mpv-play-config-key-v1';
+        // PBKDF2 with 390k iterations (OWASP recommendation) for key derivation
+        const rawKey = crypto.pbkdf2Sync(material, salt, 390000, 32, 'sha256');
         // Fernet expects urlsafe-b64 32-byte key WITH padding (matches Python's urlsafe_b64encode)
         const fernetKey = rawKey.toString('base64url') + '='.repeat((4 - rawKey.toString('base64url').length % 4) % 4);
 
