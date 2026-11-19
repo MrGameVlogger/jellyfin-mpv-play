@@ -55,7 +55,7 @@
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-.tar.gz-yellow?style=for-the-badge&logo=linux"></a>
 <a href="https://github.com/MrGameVlogger/jellyfin-mpv-play/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-.zip-blue?style=for-the-badge&logo=windows"></a>
 
-All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. Linux bundles also carry their own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros. The Linux tray app additionally requires Python 3 with GTK3 and AppIndicator (see Quick Start below).
+All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/installation/) is required. Linux bundles also carry their own `libatomic` (required by Node.js 25+), so no system packages beyond MPV are needed — even on minimal distros. The Linux tray app additionally requires Python 3 with GTK3, AppIndicator, and `cryptography` (see Quick Start below).
 
 **Supported platforms:** macOS 13.5+ (Apple Silicon release bundle; Intel Macs: build from source with `./macapp/build.sh`) · Linux x86-64 and arm64 with glibc 2.28+ (not musl/Alpine) · Windows 10 1809+.
 
@@ -124,13 +124,13 @@ All bundles include their own Node.js runtime. Only [MPV Player](https://mpv.io/
 1. **Install MPV and dependencies:**
    ```bash
    # Ubuntu/Debian
-   sudo apt install mpv python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 libnotify4
+   sudo apt install mpv python3-gi python3-gi-cairo python3-cryptography gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 libnotify4
    # Fedora
-   sudo dnf install mpv python3-gobject gtk3 libayatana-appindicator-gtk3 libnotify
+   sudo dnf install mpv python3-gobject python3-cryptography gtk3 libayatana-appindicator-gtk3 libnotify
    # Arch
-   sudo pacman -S mpv python-gobject gtk3 libayatana-appindicator libnotify
+   sudo pacman -S mpv python-gobject python-cryptography gtk3 libayatana-appindicator libnotify
    # openSUSE
-   sudo zypper install mpv python3-gobject-Gdk gtk3 libayatana-appindicator3-1 libnotify4
+   sudo zypper install mpv python3-gobject-Gdk python3-cryptography gtk3 libayatana-appindicator3-1 libnotify4
    ```
 
 2. **Download** the latest `JellyfinMPVPlay-Linux-Tray-*.tar.gz` from [Releases](https://github.com/MrGameVlogger/jellyfin-mpv-play/releases)

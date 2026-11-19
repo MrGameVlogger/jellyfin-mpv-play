@@ -143,7 +143,7 @@ DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 # Find Python 3 with GTK3 and AppIndicator support
 for py in python3 python3.11 python3.10 python3.9; do
     if command -v "$py" &>/dev/null; then
-        if "$py" -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk" 2>/dev/null; then
+        if "$py" -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk; from cryptography.fernet import Fernet" 2>/dev/null; then
             export PYTHONPATH="$DIR/src:$PYTHONPATH"
             export NODE_PATH="$DIR/node_modules:$NODE_PATH"
             export LD_LIBRARY_PATH="$DIR/lib:$LD_LIBRARY_PATH"
@@ -153,8 +153,8 @@ for py in python3 python3.11 python3.10 python3.9; do
     fi
 done
 
-echo "ERROR: Python 3 with GTK3 (PyGObject) is required." >&2
-echo "Install with: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1" >&2
+echo "ERROR: Python 3 with GTK3 (PyGObject) and cryptography is required." >&2
+echo "Install with: sudo apt install python3-gi python3-gi-cairo python3-cryptography gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1" >&2
 exit 1
 LAUNCHER
 chmod +x "$BUILD_DIR/jellyfin-mpv-play-tray"
