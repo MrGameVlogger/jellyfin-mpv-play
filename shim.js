@@ -53,7 +53,7 @@ function decryptConfigValue(value) {
         const b64 = rawKey.toString('base64url');
         const fernetKey = b64 + '='.repeat((4 - b64.length % 4) % 4);
         const secret = new fernet.Secret(fernetKey);
-        const token = new fernet.Token({ secret, token: value.slice(4) });
+        const token = new fernet.Token({ secret, token: value.slice(4), ttl: 0 });
         return token.decode();
     } catch {
         return value;

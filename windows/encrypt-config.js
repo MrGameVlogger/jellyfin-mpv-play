@@ -31,7 +31,7 @@ function encryptValue(plaintext) {
     if (!plaintext || plaintext.startsWith('enc:')) return plaintext;
     const fernet = require('fernet');
     const secret = new fernet.Secret(deriveFernetKey());
-    const token = new fernet.Token({ secret, message: plaintext, time: new Date() });
+    const token = new fernet.Token({ secret, message: plaintext, time: new Date(), ttl: 0 });
     return 'enc:' + token.encode();
 }
 
