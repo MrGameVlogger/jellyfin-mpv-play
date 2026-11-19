@@ -420,18 +420,20 @@ See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ### Recent Releases
 
+**v1.18.3** — Fixed reconnect storm (duplicate sessions + Fernet TTL) ([details](CHANGELOG.md#v1183))
+
 **v1.18.2** — Encrypted config.js passwords (Fernet/AES), auth timeout fix, Windows encrypt script ([details](CHANGELOG.md#v1182))
 
 **v1.18.1** — Fixed arm64 Linux tray bundle missing libatomic (self-contained on minimal distros) ([details](CHANGELOG.md#v1181))
 
 **v1.18.0** — Linux tray application, OSD reset fix, AudioBook/Trailer playback, security fixes (ws, axios) ([details](CHANGELOG.md#v1180))
 
-**v1.17.2** — macOS: honest 13.5 floor + node probe/fallback; supported-platform matrix ([details](CHANGELOG.md#v1172))
-
 
 
 <details>
 <summary><b>Older releases</b></summary>
+
+**v1.17.2** — macOS: honest 13.5 floor + node probe/fallback; supported-platform matrix ([details](CHANGELOG.md#v1172))
 
 **v1.17.1** — Linux bundle ships its own libatomic (self-contained on minimal distros again) ([details](CHANGELOG.md#v1171))
 
