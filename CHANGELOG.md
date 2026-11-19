@@ -18,6 +18,14 @@ All notable changes to Jellyfin MPV Play are documented here.
 
 -->
 
+## v1.18.3
+
+### Bug Fixes
+- **Fixed reconnect storm from duplicate sessions** — When two shim instances share the same deviceId (e.g., a test process and the real app), Jellyfin kicks one with "System Shutdown" on every connect, causing a reconnect loop. The shim now auto-detects this pattern and switches to a different deviceId after 2 consecutive kicks within 3 seconds of connecting.
+- **Fixed config encryption expiring after 60 seconds** — The Fernet decryption library enforces a default token TTL that rejected config passwords encrypted more than 60 seconds ago, causing auth failures and reconnect loops. TTL check disabled for config-at-rest decryption.
+
+---
+
 ## v1.18.2
 
 ### Security
