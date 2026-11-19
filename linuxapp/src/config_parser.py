@@ -24,9 +24,10 @@ APP_NAME = "JellyfinMpvPlay"
 # real protection against an attacker with physical access.
 
 def _derive_fernet_key() -> bytes:
-    """Derive a 32-byte Fernet key from machine identity."""
-    material = f"{socket.gethostname()}:{getpass.getuser()}:jf-mpv-play"
-    raw = hashlib.sha256(material.encode("utf-8")).digest()
+    """Derive a 32-byte Fernet key from machine identity using PBKDF2."""
+    material = f"{socket.gethostname()}:{getpass.getuser()}:jf-mpv-play".encode("utf-8")
+    salt = b"jf-mpv-play-config-key-v1"
+    raw = hashlib.pbkdf2_hmac("sha256", material, salt, 390000, dklen=32)
     return base64.urlsafe_b64encode(raw)  # Fernet expects urlsafe-b64 32-byte key
 
 
