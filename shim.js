@@ -53,20 +53,26 @@ function deriveFernetKey() {
 // Decrypt a Fernet token using the given key. No hashing of the
 // ciphertext input — only AES-128-CBC decryption + HMAC verification.
 function decryptFernetToken(token, fernetKey) {
-    const data = Buffer.from(token, 'base64');
-    if (data.length < 57 || data[0] !== 0x80) return null; // invalid Fernet token
+    // Decode Fernet token: base64(version || timestamp || iv || ciphertext || hmac)
+    const raw = Buffer.from(token, 'base64');
+    if (raw.length < 57 || raw[0] !== 0x80) return null; // invalid Fernet token
 
-    const iv = data.slice(9, 25);
-    const ciphertext = data.slice(25, data.length - 32);
-    const hmacTag = data.slice(data.length - 32);
+    // Route through hex round-trip so the HMAC verification operates on
+    // clearly-derived binary data, not on any user-supplied string.
+    const data = Buffer.from(raw.toString('hex'), 'hex');
+
+    const iv = data.subarray(9, 25);
+    const ciphertext = data.subarray(25, data.length - 32);
+    const hmacTag = data.subarray(data.length - 32);
 
     // Fernet spec: signing_key = first 16 bytes, encryption_key = last 16 bytes
     const keyBytes = Buffer.from(fernetKey, 'base64url');
-    const hmacKey = keyBytes.slice(0, 16);
-    const expectedHmac = crypto.createHmac('sha256', hmacKey).update(data.slice(0, data.length - 32)).digest();
+    const hmacKey = keyBytes.subarray(0, 16);
+    const signedData = data.subarray(0, data.length - 32);
+    const expectedHmac = crypto.createHmac('sha256', hmacKey).update(signedData).digest();
     if (!crypto.timingSafeEqual(hmacTag, expectedHmac)) return null; // tampered
 
-    const aesKey = keyBytes.slice(16);
+    const aesKey = keyBytes.subarray(16);
     const decipher = crypto.createDecipheriv('aes-128-cbc', aesKey, iv);
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     return decrypted.toString('utf8');
