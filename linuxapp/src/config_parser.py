@@ -17,25 +17,27 @@ APP_NAME = "JellyfinMpvPlay"
 
 
 # ── Sensitive value encryption ─────────────────────────────────────────
-# Passwords and API keys are XOR-encrypted with a machine-derived key
-# before being written to config.js. The key is SHA-256(hostname:username).
-# This is obfuscation, not strong encryption — use full-disk encryption
-# for real protection. But it satisfies "not stored in clear text" and
-# protects against casual filesystem access (backups, other users).
+# Passwords and API keys are encrypted with Fernet (AES-128-CBC + HMAC)
+# before being written to config.js. The key is derived from machine
+# identity (SHA-256 of hostname:username). This protects against casual
+# filesystem access (backups, other users). Use full-disk encryption for
+# real protection against an attacker with physical access.
 
-def _derive_key() -> bytes:
+def _derive_fernet_key() -> bytes:
+    """Derive a 32-byte Fernet key from machine identity."""
     material = f"{socket.gethostname()}:{getpass.getuser()}:jf-mpv-play"
-    return hashlib.sha256(material.encode("utf-8")).digest()
+    raw = hashlib.sha256(material.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(raw)  # Fernet expects urlsafe-b64 32-byte key
 
 
 def encrypt_value(plaintext: str) -> str:
     """Encrypt a sensitive string for storage in config.js."""
     if not plaintext:
         return plaintext
-    key = _derive_key()
-    data = plaintext.encode("utf-8")
-    encrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-    return "enc:" + base64.b64encode(encrypted).decode("ascii")
+    from cryptography.fernet import Fernet
+    f = Fernet(_derive_fernet_key())
+    encrypted = f.encrypt(plaintext.encode("utf-8"))
+    return "enc:" + encrypted.decode("ascii")
 
 
 def decrypt_value(value: str) -> str:
@@ -46,9 +48,9 @@ def decrypt_value(value: str) -> str:
     if not value or not isinstance(value, str) or not value.startswith("enc:"):
         return value
     try:
-        key = _derive_key()
-        data = base64.b64decode(value[4:])
-        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+        from cryptography.fernet import Fernet
+        f = Fernet(_derive_fernet_key())
+        decrypted = f.decrypt(value[4:].encode("ascii"))
         return decrypted.decode("utf-8")
     except Exception:
         return value
