@@ -1,6 +1,124 @@
 import Foundation
+import CommonCrypto
 
 enum ConfigParser {
+
+    // MARK: - Sensitive value encryption (Fernet)
+
+    /// Derive a 32-byte Fernet key from machine identity using PBKDF2.
+    /// Matches linuxapp/src/config_parser.py and shim.js.
+    private static func deriveFernetKey() -> Data {
+        // Use gethostname() to match Python's socket.gethostname() and
+        // Node's os.hostname() exactly (ProcessInfo.hostName lowercases).
+        var hostnameBuf = [CChar](repeating: 0, count: 256)
+        gethostname(&hostnameBuf, hostnameBuf.count)
+        let hostname = String(cString: hostnameBuf)
+        let username = NSUserName()
+        let material = "\(hostname):\(username):jf-mpv-play"
+        let salt = "jf-mpv-play-config-key-v1"
+        var derived = Data(count: 32)
+        let materialData = material.data(using: .utf8)!
+        let saltData = salt.data(using: .utf8)!
+        derived.withUnsafeMutableBytes { derivedPtr in
+            _ = CCKeyDerivationPBKDF(
+                CCPBKDFAlgorithm(kCCPBKDF2),
+                materialData.withUnsafeBytes { $0.bindMemory(to: Int8.self).baseAddress },
+                materialData.count,
+                saltData.withUnsafeBytes { $0.bindMemory(to: UInt8.self).baseAddress },
+                saltData.count,
+                CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                390000,
+                derivedPtr.bindMemory(to: UInt8.self).baseAddress,
+                32
+            )
+        }
+        return derived
+    }
+
+    /// Encrypt a sensitive string for storage in config.js using Fernet
+    /// (AES-128-CBC + HMAC-SHA256). Returns "enc:base64token".
+    static func encryptValue(_ plaintext: String) -> String {
+        if plaintext.isEmpty { return plaintext }
+        let key = deriveFernetKey()
+        let signingKey = key.prefix(16)
+        let encryptionKey = key.suffix(16)
+
+        let plaintextData = plaintext.data(using: .utf8)!
+        let iv = randomBytes(16)
+
+        // AES-128-CBC encrypt
+        let ciphertext = aesCbcEncrypt(plaintextData, key: Data(encryptionKey), iv: iv)
+
+        // Build Fernet payload: version || timestamp || iv || ciphertext
+        var payload = Data([0x80])
+        var timestamp = UInt64(Date().timeIntervalSince1970).bigEndian
+        payload.append(Data(bytes: &timestamp, count: 8))
+        payload.append(iv)
+        payload.append(ciphertext)
+
+        // HMAC-SHA256 over payload
+        let hmacTag = hmacSha256(payload, key: Data(signingKey))
+
+        // Fernet token: base64url(payload || hmac)
+        var token = payload
+        token.append(hmacTag)
+        let b64 = token.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        return "enc:" + b64
+    }
+
+    // MARK: - Crypto helpers
+
+    private static func randomBytes(_ count: Int) -> Data {
+        var data = Data(count: count)
+        data.withUnsafeMutableBytes { ptr in
+            _ = SecRandomCopyBytes(kSecRandomDefault, count, ptr.baseAddress!)
+        }
+        return data
+    }
+
+    private static func aesCbcEncrypt(_ data: Data, key: Data, iv: Data) -> Data {
+        let bufferSize = data.count + kCCBlockSizeAES128
+        var buffer = Data(count: bufferSize)
+        var numBytesEncrypted = 0
+        buffer.withUnsafeMutableBytes { bufferPtr in
+            data.withUnsafeBytes { dataPtr in
+                key.withUnsafeBytes { keyPtr in
+                    iv.withUnsafeBytes { ivPtr in
+                        _ = CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyPtr.baseAddress, key.count,
+                            ivPtr.baseAddress,
+                            dataPtr.baseAddress, data.count,
+                            bufferPtr.baseAddress, bufferSize,
+                            &numBytesEncrypted
+                        )
+                    }
+                }
+            }
+        }
+        return buffer.prefix(numBytesEncrypted)
+    }
+
+    private static func hmacSha256(_ data: Data, key: Data) -> Data {
+        var result = Data(count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { dataPtr in
+            key.withUnsafeBytes { keyPtr in
+                result.withUnsafeMutableBytes { resultPtr in
+                    CCHmac(
+                        CCHmacAlgorithm(kCCHmacAlgSHA256),
+                        keyPtr.baseAddress, key.count,
+                        dataPtr.baseAddress, data.count,
+                        resultPtr.baseAddress
+                    )
+                }
+            }
+        }
+        return result
+    }
     private static func stripComments(from content: String) -> String {
         return content.components(separatedBy: .newlines)
             .map { line -> String in
