@@ -39,54 +39,22 @@ const pkg = require('./package.json');
 // Jellyfin time is in 100ns ticks — 10,000,000 ticks per second
 const TICKS_PER_SECOND = 10000000;
 
-// Derive the Fernet key from machine identity (NOT from any password).
-// PBKDF2 with 390k iterations (OWASP recommendation).
-function deriveFernetKey() {
-    const os = require('os');
-    const material = `${os.hostname()}:${os.userInfo().username}:jf-mpv-play`;
-    const salt = 'jf-mpv-play-config-key-v1';
-    const rawKey = crypto.pbkdf2Sync(material, salt, 390000, 32, 'sha256');
-    // Fernet expects urlsafe-b64 32-byte key WITH padding (matches Python's urlsafe_b64encode)
-    return rawKey.toString('base64url') + '='.repeat((4 - rawKey.toString('base64url').length % 4) % 4);
-}
-
-// Decrypt a Fernet token using the given key. No hashing of the
-// ciphertext input — only AES-128-CBC decryption + HMAC verification.
-function decryptFernetToken(token, fernetKey) {
-    // Decode Fernet token: base64(version || timestamp || iv || ciphertext || hmac)
-    const raw = Buffer.from(token, 'base64');
-    if (raw.length < 57 || raw[0] !== 0x80) return null; // invalid Fernet token
-
-    // Route through hex round-trip so the HMAC verification operates on
-    // clearly-derived binary data, not on any user-supplied string.
-    const data = Buffer.from(raw.toString('hex'), 'hex');
-
-    const iv = data.subarray(9, 25);
-    const ciphertext = data.subarray(25, data.length - 32);
-    const hmacTag = data.subarray(data.length - 32);
-
-    // Fernet spec: signing_key = first 16 bytes, encryption_key = last 16 bytes
-    const keyBytes = Buffer.from(fernetKey, 'base64url');
-    // Use a KeyObject for HMAC — avoids CodeQL associating createHmac with password hashing
-    const hmacKeyObj = crypto.createSecretKey(keyBytes.subarray(0, 16));
-    const signedData = data.subarray(0, data.length - 32);
-    const expectedHmac = crypto.createHmac('sha256', hmacKeyObj).update(signedData).digest();
-    if (!crypto.timingSafeEqual(hmacTag, expectedHmac)) return null; // tampered
-
-    const aesKey = keyBytes.subarray(16);
-    const decipher = crypto.createDecipheriv('aes-128-cbc', aesKey, iv);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return decrypted.toString('utf8');
-}
-
 // Decrypt sensitive config values (password, apiKey) stored as Fernet
-// tokens (enc:...) by the setup wizard / preferences UI. Values without
-// the enc: prefix are returned as-is (backward compatible with plain text).
+// tokens (enc:...) by the setup wizard / preferences UI. Uses the
+// 'fernet' npm package for decryption. Values without the enc: prefix
+// are returned as-is (backward compatible with plain text).
 function decryptConfigValue(value) {
     if (!value || typeof value !== 'string' || !value.startsWith('enc:')) return value;
     try {
-        const result = decryptFernetToken(value.slice(4), deriveFernetKey());
-        return result !== null ? result : value;
+        const fernet = require('fernet');
+        const os = require('os');
+        const material = `${os.hostname()}:${os.userInfo().username}:jf-mpv-play`;
+        const rawKey = crypto.pbkdf2Sync(material, 'jf-mpv-play-config-key-v1', 390000, 32, 'sha256');
+        const b64 = rawKey.toString('base64url');
+        const fernetKey = b64 + '='.repeat((4 - b64.length % 4) % 4);
+        const secret = new fernet.Secret(fernetKey);
+        const token = new fernet.Token({ secret, token: value.slice(4) });
+        return token.decode();
     } catch {
         return value;
     }
