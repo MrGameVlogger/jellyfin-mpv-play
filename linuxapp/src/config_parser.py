@@ -40,6 +40,16 @@ def encrypt_value(plaintext: str) -> str:
     return "enc:" + encrypted.decode("ascii")
 
 
+def get_fernet():
+    """Return a Fernet instance with the machine-derived key.
+
+    Use this directly at call sites so CodeQL sees Fernet.encrypt()
+    as a sanitizer (it can't see through function boundaries).
+    """
+    from cryptography.fernet import Fernet
+    return Fernet(_derive_fernet_key())
+
+
 def decrypt_value(value: str) -> str:
     """Decrypt a sensitive string read from config.js.
 

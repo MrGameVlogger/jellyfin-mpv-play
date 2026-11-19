@@ -17,6 +17,7 @@ from config_parser import (
     encrypt_value,
     escape_config_value,
     extract_value,
+    get_fernet,
     list_config_files,
     selected_config_file_name,
     set_selected_config_file_name,
@@ -505,13 +506,13 @@ class PreferencesWindow(Gtk.Window):
         lines = [
             f"    serverUrl: '{escape_config_value(server_url)}',",
             f"    username: '{escape_config_value(username)}',",
-            f"    password: '{escape_config_value(encrypt_value(password))}',",
+            f"    password: 'enc:{get_fernet().encrypt(password.encode()).decode()}',",
         ]
 
         # Optional — omitted when empty, so the shim falls back to the login token.
         api_key = self.api_key_entry.get_text().strip()
         if api_key:
-            lines.append(f"    apiKey: '{escape_config_value(encrypt_value(api_key))}',")
+            lines.append(f"    apiKey: 'enc:{get_fernet().encrypt(api_key.encode()).decode()}',")
 
         e = escape_config_value
         lines.append(f"    mpvPath: '{e(self.mpv_path_entry.get_text().strip())}',")
