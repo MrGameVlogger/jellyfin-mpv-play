@@ -12,6 +12,7 @@ from config_parser import (
     default_mpv_path,
     build_config,
     encrypt_value,
+    get_fernet,
     test_connection,
     escape_config_value,
 )
@@ -522,7 +523,7 @@ class SetupWizardWindow(Gtk.Window):
         lines = [
             "    serverUrl: '%s'," % e(self._server),
             "    username: '%s'," % e(self._username),
-            "    password: '%s'," % e(encrypt_value(self._password)),
+            "    password: 'enc:%s'," % get_fernet().encrypt(self._password.encode()).decode(),
             "    mpvPath: '%s'," % e(self._mpv_path),
             "    deviceName: '%s'," % e(self._device_name),
             "    deviceId: '%s'," % e(self._device_id),
