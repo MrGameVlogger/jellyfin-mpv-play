@@ -129,7 +129,7 @@ echo "Build complete: $APP_BUNDLE"
 echo "Run with: open \"$APP_BUNDLE\""
 
 # Deploy to /Applications (skip in CI)
-if [ -n "$CI" ]; then
+if [ -n "${CI:-}" ]; then
     echo "CI environment detected, skipping deploy to /Applications."
 else
     DEPLOY_PATH="/Applications/$APP_NAME.app"
